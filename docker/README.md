@@ -1,0 +1,1 @@
+This directory contains Docker-related assets (e.g., Postgres init scripts).
