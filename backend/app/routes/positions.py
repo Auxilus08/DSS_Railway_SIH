@@ -1,0 +1,495 @@
+"""
+Position tracking API routes
+Real-time train position updates and retrieval
+"""
+
+from datetime import datetime, timedelta
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc
+from ..db import get_session
+from ..models import Train, Position, Section
+from ..schemas import (
+    PositionUpdate, BulkPositionUpdate, PositionResponse, 
+    APIResponse, ErrorResponse, PositionBroadcast
+)
+from ..auth import get_current_active_controller
+from ..redis_client import get_redis, RedisClient
+from ..websocket_manager import connection_manager
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/trains", tags=["Position Tracking"])
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
+
+async def validate_train_exists(train_id: int, db: Session) -> Train:
+    """Validate that train exists and is active"""
+    train = db.query(Train).filter(
+        Train.id == train_id,
+        Train.operational_status.in_(["active", "maintenance"])
+    ).first()
+    
+    if not train:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Train with ID {train_id} not found or inactive"
+        )
+    
+    return train
+
+
+async def validate_section_exists(section_id: int, db: Session) -> Section:
+    """Validate that section exists and is active"""
+    section = db.query(Section).filter(
+        Section.id == section_id,
+        Section.active == True
+    ).first()
+    
+    if not section:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Section with ID {section_id} not found or inactive"
+        )
+    
+    return section
+
+
+async def store_position_update(
+    position_update: PositionUpdate,
+    db: Session,
+    redis_client: RedisClient
+) -> Position:
+    """Store position update in database and cache"""
+    
+    # Create position record
+    position = Position(
+        train_id=position_update.train_id,
+        section_id=position_update.section_id,
+        timestamp=position_update.timestamp,
+        coordinates=f"POINT({position_update.coordinates.longitude} {position_update.coordinates.latitude})",
+        speed_kmh=position_update.speed_kmh,
+        direction=position_update.heading,
+        distance_from_start=position_update.distance_from_start,
+        signal_strength=position_update.signal_strength,
+        gps_accuracy=position_update.gps_accuracy,
+        altitude=position_update.coordinates.altitude
+    )
+    
+    db.add(position)
+    db.commit()
+    db.refresh(position)
+    
+    # Cache the position
+    position_data = {
+        "train_id": position.train_id,
+        "section_id": position.section_id,
+        "coordinates": {
+            "latitude": position_update.coordinates.latitude,
+            "longitude": position_update.coordinates.longitude,
+            "altitude": position_update.coordinates.altitude
+        },
+        "speed_kmh": float(position.speed_kmh),
+        "heading": float(position.direction) if position.direction else None,
+        "timestamp": position.timestamp.isoformat(),
+        "distance_from_start": float(position.distance_from_start) if position.distance_from_start else None,
+        "signal_strength": position.signal_strength,
+        "gps_accuracy": float(position.gps_accuracy) if position.gps_accuracy else None
+    }
+    
+    await redis_client.cache_train_position(position.train_id, position_data)
+    
+    return position
+
+
+async def broadcast_position_update(
+    train: Train,
+    position: Position,
+    section: Section,
+    redis_client: RedisClient
+):
+    """Broadcast position update via WebSocket and Redis pub/sub"""
+    
+    position_broadcast = PositionBroadcast(
+        train_id=train.id,
+        train_number=train.train_number,
+        train_type=train.type,
+        position=PositionResponse(
+            train_id=position.train_id,
+            section_id=position.section_id,
+            section_code=section.section_code,
+            section_name=section.name,
+            coordinates={
+                "latitude": position.coordinates.y if position.coordinates else 0,
+                "longitude": position.coordinates.x if position.coordinates else 0,
+                "altitude": position.altitude
+            },
+            speed_kmh=float(position.speed_kmh),
+            heading=float(position.direction) if position.direction else 0,
+            timestamp=position.timestamp,
+            distance_from_start=float(position.distance_from_start) if position.distance_from_start else None,
+            signal_strength=position.signal_strength,
+            gps_accuracy=float(position.gps_accuracy) if position.gps_accuracy else None
+        ),
+        timestamp=datetime.utcnow()
+    )
+    
+    # Broadcast via WebSocket
+    await connection_manager.broadcast_position_update(position_broadcast)
+    
+    # Publish to Redis for cross-instance communication
+    await redis_client.publish("railway:positions", position_broadcast.dict())
+
+
+@router.post("/position", response_model=APIResponse)
+@limiter.limit("1000/minute")
+async def update_train_position(
+    request,
+    position_update: PositionUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+    redis_client: RedisClient = Depends(get_redis)
+):
+    """
+    Update single train position
+    
+    Rate limit: 1000 requests per minute per IP
+    Response time target: <100ms
+    """
+    
+    try:
+        # Validate train exists
+        train = await validate_train_exists(position_update.train_id, db)
+        
+        # Validate section exists
+        section = await validate_section_exists(position_update.section_id, db)
+        
+        # Check rate limit for specific train
+        rate_limit_key = f"train_position:{position_update.train_id}"
+        rate_limit = await redis_client.check_rate_limit(rate_limit_key, 1000, 60)
+        
+        if not rate_limit["allowed"]:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for this train",
+                headers={
+                    "X-RateLimit-Remaining": str(rate_limit["remaining"]),
+                    "X-RateLimit-Reset": rate_limit["reset_time"].isoformat()
+                }
+            )
+        
+        # Store position update
+        position = await store_position_update(position_update, db, redis_client)
+        
+        # Update train's current section if changed
+        if train.current_section_id != position_update.section_id:
+            train.current_section_id = position_update.section_id
+            train.speed_kmh = position_update.speed_kmh
+            db.commit()
+        
+        # Broadcast update in background
+        background_tasks.add_task(
+            broadcast_position_update,
+            train, position, section, redis_client
+        )
+        
+        # Increment performance counter
+        await redis_client.increment_counter("position_updates_total")
+        
+        return APIResponse(
+            success=True,
+            message="Position updated successfully",
+            data={
+                "train_id": position.train_id,
+                "timestamp": position.timestamp.isoformat(),
+                "section_code": section.section_code
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating position for train {position_update.train_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while updating position"
+        )
+
+
+@router.post("/position/bulk", response_model=APIResponse)
+@limiter.limit("100/minute")
+async def bulk_update_positions(
+    request,
+    bulk_update: BulkPositionUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+    redis_client: RedisClient = Depends(get_redis),
+    controller = Depends(get_current_active_controller)
+):
+    """
+    Bulk update multiple train positions
+    
+    Requires authentication
+    Rate limit: 100 requests per minute per IP
+    Max 100 positions per request
+    """
+    
+    try:
+        updated_positions = []
+        errors = []
+        
+        for position_update in bulk_update.positions:
+            try:
+                # Validate train and section
+                train = await validate_train_exists(position_update.train_id, db)
+                section = await validate_section_exists(position_update.section_id, db)
+                
+                # Store position
+                position = await store_position_update(position_update, db, redis_client)
+                
+                # Update train's current section
+                if train.current_section_id != position_update.section_id:
+                    train.current_section_id = position_update.section_id
+                    train.speed_kmh = position_update.speed_kmh
+                
+                updated_positions.append({
+                    "train_id": position.train_id,
+                    "timestamp": position.timestamp.isoformat(),
+                    "section_code": section.section_code
+                })
+                
+                # Broadcast update in background
+                background_tasks.add_task(
+                    broadcast_position_update,
+                    train, position, section, redis_client
+                )
+            
+            except Exception as e:
+                errors.append({
+                    "train_id": position_update.train_id,
+                    "error": str(e)
+                })
+        
+        # Commit all train updates
+        db.commit()
+        
+        # Update performance counters
+        await redis_client.increment_counter("bulk_position_updates_total")
+        await redis_client.increment_counter("position_updates_total", len(updated_positions))
+        
+        response_data = {
+            "updated_count": len(updated_positions),
+            "error_count": len(errors),
+            "updated_positions": updated_positions
+        }
+        
+        if errors:
+            response_data["errors"] = errors
+        
+        return APIResponse(
+            success=len(errors) == 0,
+            message=f"Bulk update completed: {len(updated_positions)} updated, {len(errors)} errors",
+            data=response_data
+        )
+    
+    except Exception as e:
+        logger.error(f"Error in bulk position update: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during bulk update"
+        )
+
+
+@router.get("/{train_id}/position", response_model=PositionResponse)
+async def get_train_position(
+    train_id: int,
+    db: Session = Depends(get_session),
+    redis_client: RedisClient = Depends(get_redis)
+):
+    """
+    Get current train position
+    
+    Returns cached position if available, otherwise queries database
+    """
+    
+    try:
+        # Try cache first
+        cached_position = await redis_client.get_train_position(train_id)
+        
+        if cached_position:
+            # Get section info for cached position
+            section = db.query(Section).filter(Section.id == cached_position["section_id"]).first()
+            
+            if section:
+                return PositionResponse(
+                    train_id=cached_position["train_id"],
+                    section_id=cached_position["section_id"],
+                    section_code=section.section_code,
+                    section_name=section.name,
+                    coordinates=cached_position["coordinates"],
+                    speed_kmh=cached_position["speed_kmh"],
+                    heading=cached_position["heading"] or 0,
+                    timestamp=datetime.fromisoformat(cached_position["timestamp"]),
+                    distance_from_start=cached_position.get("distance_from_start"),
+                    signal_strength=cached_position.get("signal_strength"),
+                    gps_accuracy=cached_position.get("gps_accuracy")
+                )
+        
+        # Query database for latest position
+        position = db.query(Position).filter(
+            Position.train_id == train_id
+        ).order_by(desc(Position.timestamp)).first()
+        
+        if not position:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No position data found for train {train_id}"
+            )
+        
+        # Get section info
+        section = db.query(Section).filter(Section.id == position.section_id).first()
+        
+        if not section:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Section {position.section_id} not found"
+            )
+        
+        # Build response
+        coordinates = {
+            "latitude": position.coordinates.y if position.coordinates else 0,
+            "longitude": position.coordinates.x if position.coordinates else 0,
+            "altitude": position.altitude
+        }
+        
+        response = PositionResponse(
+            train_id=position.train_id,
+            section_id=position.section_id,
+            section_code=section.section_code,
+            section_name=section.name,
+            coordinates=coordinates,
+            speed_kmh=float(position.speed_kmh),
+            heading=float(position.direction) if position.direction else 0,
+            timestamp=position.timestamp,
+            distance_from_start=float(position.distance_from_start) if position.distance_from_start else None,
+            signal_strength=position.signal_strength,
+            gps_accuracy=float(position.gps_accuracy) if position.gps_accuracy else None
+        )
+        
+        # Cache the response
+        await redis_client.cache_train_position(train_id, {
+            "train_id": position.train_id,
+            "section_id": position.section_id,
+            "coordinates": coordinates,
+            "speed_kmh": float(position.speed_kmh),
+            "heading": float(position.direction) if position.direction else None,
+            "timestamp": position.timestamp.isoformat(),
+            "distance_from_start": float(position.distance_from_start) if position.distance_from_start else None,
+            "signal_strength": position.signal_strength,
+            "gps_accuracy": float(position.gps_accuracy) if position.gps_accuracy else None
+        })
+        
+        return response
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting position for train {train_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while retrieving position"
+        )
+
+
+@router.get("/{train_id}/position/history")
+async def get_train_position_history(
+    train_id: int,
+    hours: int = 1,
+    limit: int = 100,
+    db: Session = Depends(get_session)
+):
+    """
+    Get train position history
+    
+    Parameters:
+    - hours: Number of hours of history to retrieve (default: 1, max: 24)
+    - limit: Maximum number of records to return (default: 100, max: 1000)
+    """
+    
+    # Validate parameters
+    if hours > 24:
+        hours = 24
+    if limit > 1000:
+        limit = 1000
+    
+    try:
+        # Validate train exists
+        train = await validate_train_exists(train_id, db)
+        
+        # Calculate time range
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(hours=hours)
+        
+        # Query position history
+        positions = db.query(Position).filter(
+            and_(
+                Position.train_id == train_id,
+                Position.timestamp >= start_time,
+                Position.timestamp <= end_time
+            )
+        ).order_by(desc(Position.timestamp)).limit(limit).all()
+        
+        # Build response
+        history = []
+        for position in positions:
+            section = db.query(Section).filter(Section.id == position.section_id).first()
+            
+            coordinates = {
+                "latitude": position.coordinates.y if position.coordinates else 0,
+                "longitude": position.coordinates.x if position.coordinates else 0,
+                "altitude": position.altitude
+            }
+            
+            history.append({
+                "timestamp": position.timestamp.isoformat(),
+                "section_id": position.section_id,
+                "section_code": section.section_code if section else "UNKNOWN",
+                "coordinates": coordinates,
+                "speed_kmh": float(position.speed_kmh),
+                "heading": float(position.direction) if position.direction else 0,
+                "distance_from_start": float(position.distance_from_start) if position.distance_from_start else None,
+                "signal_strength": position.signal_strength,
+                "gps_accuracy": float(position.gps_accuracy) if position.gps_accuracy else None
+            })
+        
+        return APIResponse(
+            success=True,
+            message=f"Retrieved {len(history)} position records",
+            data={
+                "train_id": train_id,
+                "train_number": train.train_number,
+                "time_range": {
+                    "start": start_time.isoformat(),
+                    "end": end_time.isoformat(),
+                    "hours": hours
+                },
+                "total_records": len(history),
+                "positions": history
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting position history for train {train_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while retrieving position history"
+        )

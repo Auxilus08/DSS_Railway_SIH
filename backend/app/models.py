@@ -6,14 +6,33 @@ Production-ready models with proper relationships and constraints
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import (
-    Column, Integer, String, Decimal, Boolean, DateTime, Text, Time,
+    Column, Integer, String, Boolean, DateTime, Text, Time, Numeric,
     ForeignKey, CheckConstraint, UniqueConstraint, Index, ARRAY, JSON
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
-from geoalchemy2 import Geometry
 from enum import Enum as PyEnum
+
+# Try to import geoalchemy2, but handle gracefully if not available
+try:
+    from geoalchemy2 import Geometry
+    POSTGIS_AVAILABLE = True
+except ImportError:
+    POSTGIS_AVAILABLE = False
+    # Create a dummy Geometry class for when PostGIS is not available
+    class Geometry:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __call__(self, *args, **kwargs):
+            return String(500)  # Use TEXT column instead
+
+# Helper function to get coordinate column type
+def get_coordinate_column(*args, **kwargs):
+    if POSTGIS_AVAILABLE:
+        return Geometry(*args, **kwargs)
+    else:
+        return String(500)  # Store as WKT or JSON string
 
 Base = declarative_base()
 
@@ -94,14 +113,14 @@ class Section(Base):
     name = Column(String(100), nullable=False)
     section_code = Column(String(20), unique=True, nullable=False)
     section_type = Column(String(20), nullable=False)
-    length_meters = Column(Decimal(10, 2), nullable=False)
+    length_meters = Column(Numeric(10, 2), nullable=False)
     max_speed_kmh = Column(Integer, nullable=False)
     capacity = Column(Integer, nullable=False, default=1)
     junction_ids = Column(ARRAY(Integer), nullable=True)
-    coordinates = Column(Geometry('LINESTRING', srid=4326), nullable=True)
-    elevation_start = Column(Decimal(8, 2), nullable=True)
-    elevation_end = Column(Decimal(8, 2), nullable=True)
-    gradient = Column(Decimal(5, 3), nullable=True)
+    coordinates = Column(String(500), nullable=True)  # Store as WKT or JSON string
+    elevation_start = Column(Numeric(8, 2), nullable=True)
+    elevation_end = Column(Numeric(8, 2), nullable=True)
+    gradient = Column(Numeric(5, 3), nullable=True)
     electrified = Column(Boolean, nullable=False, default=False)
     signaling_system = Column(String(50), nullable=True)
     maintenance_window_start = Column(Time, nullable=True)
@@ -149,7 +168,7 @@ class Train(Base):
     train_number = Column(String(20), unique=True, nullable=False)
     type = Column(train_type_enum, nullable=False)
     current_section_id = Column(Integer, ForeignKey('sections.id'), nullable=True)
-    speed_kmh = Column(Decimal(5, 2), nullable=False, default=0)
+    speed_kmh = Column(Numeric(5, 2), nullable=False, default=0)
     max_speed_kmh = Column(Integer, nullable=False)
     capacity = Column(Integer, nullable=False)
     current_load = Column(Integer, nullable=False, default=0)
@@ -162,8 +181,8 @@ class Train(Base):
     estimated_arrival = Column(DateTime(timezone=True), nullable=True)
     driver_id = Column(String(20), nullable=True)
     conductor_id = Column(String(20), nullable=True)
-    length_meters = Column(Decimal(8, 2), nullable=False)
-    weight_tons = Column(Decimal(10, 2), nullable=False)
+    length_meters = Column(Numeric(8, 2), nullable=False)
+    weight_tons = Column(Numeric(10, 2), nullable=False)
     engine_power_kw = Column(Integer, nullable=True)
     fuel_type = Column(String(20), nullable=True)
     operational_status = Column(String(20), nullable=False, default='active')
@@ -216,13 +235,13 @@ class Position(Base):
     train_id = Column(Integer, ForeignKey('trains.id', ondelete='CASCADE'), primary_key=True)
     timestamp = Column(DateTime(timezone=True), primary_key=True, default=datetime.utcnow)
     section_id = Column(Integer, ForeignKey('sections.id'), nullable=False)
-    coordinates = Column(Geometry('POINT', srid=4326), nullable=True)
-    speed_kmh = Column(Decimal(5, 2), nullable=False, default=0)
-    direction = Column(Decimal(5, 2), nullable=True)
-    distance_from_start = Column(Decimal(10, 2), nullable=True)
+    coordinates = Column(String(500), nullable=True)  # Store as WKT or JSON string
+    speed_kmh = Column(Numeric(5, 2), nullable=False, default=0)
+    direction = Column(Numeric(5, 2), nullable=True)
+    distance_from_start = Column(Numeric(10, 2), nullable=True)
     signal_strength = Column(Integer, nullable=True)
-    gps_accuracy = Column(Decimal(5, 2), nullable=True)
-    altitude = Column(Decimal(8, 2), nullable=True)
+    gps_accuracy = Column(Numeric(5, 2), nullable=True)
+    altitude = Column(Numeric(8, 2), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     # Relationships

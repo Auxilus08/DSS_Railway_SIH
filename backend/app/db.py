@@ -1,7 +1,11 @@
 import os
-from sqlalchemy import create_engine
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def get_engine():
@@ -46,8 +50,19 @@ def init_database():
     
     with engine.connect() as conn:
         # Enable required extensions
-        conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
-        conn.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE"))
+            print("✅ TimescaleDB extension enabled")
+        except Exception as e:
+            print(f"⚠️ TimescaleDB extension warning: {e}")
+        
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+            print("✅ PostGIS extension enabled")
+        except Exception as e:
+            print(f"⚠️ PostGIS extension not available: {e}")
+            print("   Geographic features will be limited")
+        
         conn.commit()
     
     print("Database initialized with required extensions")

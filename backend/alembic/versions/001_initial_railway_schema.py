@@ -20,7 +20,14 @@ depends_on = None
 def upgrade() -> None:
     # Enable extensions
     op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
-    op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+    
+    # Try to enable PostGIS, but continue if it fails
+    try:
+        op.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+        postgis_available = True
+    except Exception:
+        postgis_available = False
+        print("⚠️ PostGIS not available, using TEXT columns for coordinates")
     
     # Create enum types
     train_type_enum = postgresql.ENUM('express', 'local', 'freight', 'maintenance', name='train_type')

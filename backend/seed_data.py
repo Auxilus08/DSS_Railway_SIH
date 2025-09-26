@@ -31,6 +31,13 @@ def create_seed_data():
     try:
         print("Creating seed data for Railway Traffic Management System...")
         
+        # Check if data already exists
+        existing_controllers = session.query(Controller).count()
+        if existing_controllers > 0:
+            print(f"⚠️ Found {existing_controllers} existing controllers, skipping seed data creation")
+            print("Use 'python setup_railway_db.py cleanup' first if you want to recreate the data")
+            return
+        
         # Create Controllers
         controllers = [
             Controller(
@@ -283,7 +290,7 @@ def create_seed_data():
                 junction_ids=[13],
                 elevation_start=Decimal("95.00"),
                 elevation_end=Decimal("5.00"),
-                gradient=Decimal("-11.250"),
+                gradient=Decimal("-10.000"),
                 electrified=True,
                 signaling_system="ETCS Level 1"
             ),

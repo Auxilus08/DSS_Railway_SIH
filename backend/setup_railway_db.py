@@ -12,6 +12,7 @@ from pathlib import Path
 # Add the app directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
+from sqlalchemy import text
 from db import get_engine, init_database
 from models import Base
 
@@ -53,40 +54,48 @@ def setup_database():
         print(f"❌ Failed to initialize database: {e}")
         return False
     
-    # Step 3: Create database tables using Alembic
+    # Step 3: Create database tables using direct SQLAlchemy creation
     print("\n📊 Creating database schema...")
-    if not run_command("alembic upgrade head", "Database schema creation"):
-        print("⚠️ Alembic migration failed, trying direct table creation...")
-        try:
-            engine = get_engine()
-            Base.metadata.create_all(engine)
-            print("✅ Tables created directly using SQLAlchemy")
-        except Exception as e:
-            print(f"❌ Direct table creation failed: {e}")
-            return False
+    try:
+        engine = get_engine()
+        Base.metadata.create_all(engine)
+        print("✅ Tables created directly using SQLAlchemy")
+    except Exception as e:
+        print(f"❌ Direct table creation failed: {e}")
+        return False
     
     # Step 4: Apply performance indexes
     print("\n⚡ Creating performance indexes...")
     try:
         engine = get_engine()
-        with engine.connect() as conn:
-            with open("schema/02_create_indexes.sql", "r") as f:
-                index_sql = f.read()
-            
-            # Split and execute each statement
-            statements = [stmt.strip() for stmt in index_sql.split(';') if stmt.strip()]
-            for stmt in statements:
-                if stmt and not stmt.startswith('--'):
-                    try:
-                        conn.execute(stmt)
-                    except Exception as e:
-                        print(f"⚠️ Index creation warning: {e}")
-            
-            conn.commit()
-        print("✅ Performance indexes created")
+        with open("schema/02_create_indexes.sql", "r") as f:
+            index_sql = f.read()
+        
+        # Split and execute each statement in separate transactions
+        statements = [stmt.strip() for stmt in index_sql.split(';') if stmt.strip()]
+        successful_indexes = 0
+        failed_indexes = 0
+        
+        for stmt in statements:
+            if stmt and not stmt.startswith('--'):
+                # Skip geometry-based indexes since we're using VARCHAR
+                if 'GIST(coordinates)' in stmt:
+                    print(f"⚠️ Skipping geometry index (PostGIS not available): {stmt[:50]}...")
+                    continue
+                    
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text(stmt))
+                        conn.commit()
+                    successful_indexes += 1
+                except Exception as e:
+                    failed_indexes += 1
+                    print(f"⚠️ Index creation warning: {e}")
+        
+        print(f"✅ Performance indexes created: {successful_indexes} successful, {failed_indexes} failed")
     except Exception as e:
         print(f"❌ Index creation failed: {e}")
-        return False
+        # Don't return False here, continue with setup
     
     # Step 5: Load seed data
     print("\n🌱 Loading seed data...")
@@ -140,7 +149,7 @@ def cleanup_database():
         
         # Drop Alembic version table
         with engine.connect() as conn:
-            conn.execute("DROP TABLE IF EXISTS alembic_version")
+            conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
             conn.commit()
         
         print("✅ Database cleanup completed")
@@ -153,16 +162,20 @@ def check_requirements():
     print("📋 Checking requirements...")
     
     required_packages = [
-        'sqlalchemy', 'psycopg2-binary', 'alembic', 
-        'geoalchemy2', 'fastapi', 'uvicorn'
+        ('sqlalchemy', 'sqlalchemy'), 
+        ('psycopg2-binary', 'psycopg2'), 
+        ('alembic', 'alembic'), 
+        ('geoalchemy2', 'geoalchemy2'), 
+        ('fastapi', 'fastapi'), 
+        ('uvicorn', 'uvicorn')
     ]
     
     missing_packages = []
-    for package in required_packages:
+    for package_name, import_name in required_packages:
         try:
-            __import__(package.replace('-', '_'))
+            __import__(import_name)
         except ImportError:
-            missing_packages.append(package)
+            missing_packages.append(package_name)
     
     if missing_packages:
         print(f"❌ Missing packages: {', '.join(missing_packages)}")

@@ -1,99 +1,115 @@
-# DSS Railway SIH – Hackathon Stack (FastAPI + React + Postgres + Redis)
+# 🚂 Railway Traffic Management System
 
-Production-ready hackathon starter with Docker Compose. Backend (FastAPI), Postgres 15 with TimescaleDB, Redis (as queue/cache), and React 18 + TypeScript + D3 dev server.
+A comprehensive, production-ready Railway Traffic Management System built for real-time train tracking, conflict detection, and traffic optimization. Developed for Smart India Hackathon (SIH).
 
-## Tech Stack
-- Backend: FastAPI (Python 3.11+)
-- DB: PostgreSQL 15 + TimescaleDB extension
-- Queue/Cache: Redis (Kafka can be added later)
-- Frontend: React 18 + TypeScript + D3.js (Vite)
-- Containerization: Docker + Docker Compose
+## 🎯 Features
 
-## Quickstart
+- **Real-time Train Tracking**: GPS-based position monitoring with WebSocket updates
+- **Conflict Detection**: Automated collision risk and traffic conflict identification  
+- **Section Management**: Track occupancy monitoring and capacity optimization
+- **Controller Dashboard**: Role-based access control for traffic controllers
+- **Decision Audit Trail**: Complete logging of all controller decisions
+- **Performance Analytics**: Network utilization and efficiency metrics
 
-0. Clone this repository
-```
+## 🛠 Tech Stack
+
+**Backend**: FastAPI (Python 3.12+), PostgreSQL 15, TimescaleDB, Redis, SQLAlchemy
+**Frontend**: React 18, TypeScript, Vite, D3.js, Tailwind CSS
+**Infrastructure**: Docker, Docker Compose, Alembic migrations
+
+## 🚀 Quick Start
+
+### 1. Clone Repository
+```bash
 git clone https://github.com/Auxilus08/DSS_Railway_SIH.git
 cd DSS_Railway_SIH
 ```
 
-1. Copy env template and adjust as needed
-```
+### 2. Environment Setup
+```bash
 cp .env.example .env
+cp backend/.env.example backend/.env
+# Edit .env files with your configuration
 ```
 
-2. Start all services
-```
+### 3. Start with Docker
+```bash
 docker-compose up --build
-# or (if using newer Docker)
-docker compose up --build
 ```
 
-This runs:
-- Postgres: 5432
-- Redis: 6379
-- Backend (FastAPI): http://localhost:8000
-- Frontend (Vite dev): http://localhost:5173
+### 4. Manual Setup (Development)
+```bash
+# Start database services
+docker-compose up postgres redis -d
 
-## Health checks
-- Backend: http://localhost:8000/api/health
-- Frontend: http://localhost:5173
-- Postgres: container health via pg_isready
-- Redis: container health via redis-cli ping
+# Backend setup
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python setup_railway_db.py
+uvicorn app.main:app --reload --port 8001
 
-## Database connection test
-The backend exposes `/api/db-check` which tests a connection to the configured Postgres instance and returns ok/error JSON.
-
-```
-curl -s http://localhost:8000/api/db-check | jq
-```
-
-## Project Structure
-```
-.
-├── backend
-│   ├── app
-│   │   ├── main.py
-│   │   └── db.py
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend
-│   ├── index.html
-│   ├── src
-│   │   ├── main.tsx
-│   │   └── App.tsx
-│   └── Dockerfile
-├── docker
-│   └── postgres
-│       └── init.sql
-├── .env.example
-├── docker-compose.yml
-├── .gitignore
-└── README.md
+# Frontend setup
+cd frontend
+npm install
+npm run dev
 ```
 
-## Notes
-- TimescaleDB extension is enabled via init SQL at container startup.
-- For Kafka later, add a Kafka service (e.g., Bitnami images) and wire to backend.
-- In dev, backend and frontend mount source volumes for hot reload.
+## 🌐 Service URLs
 
-## Common commands
-- Rebuild a single service
-```
-docker compose build backend && docker compose up backend
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8001  
+- **API Docs**: http://localhost:8001/docs
+- **PostgreSQL**: localhost:5432
+- **Redis**: localhost:6379
+
+## 📊 Key Components
+
+### Database Schema
+- **trains** - Train information and status
+- **sections** - Track sections, junctions, stations  
+- **positions** - Real-time positions (TimescaleDB)
+- **controllers** - Traffic controller accounts
+- **conflicts** - Detected traffic conflicts
+- **decisions** - Controller decision audit trail
+
+### API Endpoints
+- Authentication: `/api/auth/*`
+- Train Management: `/api/trains/*`
+- Section Management: `/api/sections/*`
+- Real-time: WebSocket `/ws`
+
+## 🧪 Testing
+
+```bash
+# Backend tests
+cd backend && pytest
+
+# Frontend tests  
+cd frontend && npm test
+
+# Performance tests
+cd backend/test_scripts && python performance_test.py
 ```
 
-- View logs
-```
-docker compose logs -f backend
-```
+## 🔒 Security Features
 
-- Connect to Postgres
-```
-docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB
-```
+- JWT token authentication
+- Role-based access control
+- Rate limiting and input validation
+- Secure environment configuration
 
-- Run tests (placeholder):
-```
-docker compose exec backend pytest
-```
+## 📚 Documentation
+
+- **API Docs**: http://localhost:8001/docs
+- **Database Guide**: [backend/RAILWAY_README.md](backend/RAILWAY_README.md)
+- **API Reference**: [backend/API_DOCUMENTATION.md](backend/API_DOCUMENTATION.md)
+
+## 🏆 Smart India Hackathon 2024
+
+Developed for SIH 2024, addressing railway traffic management modernization with real-time monitoring and intelligent conflict resolution.
+
+---
+
+**Built with ❤️ for Smart India Hackathon 2024**
