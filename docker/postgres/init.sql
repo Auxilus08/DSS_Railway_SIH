@@ -1,13 +1,16 @@
--- Enable TimescaleDB extension
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+-- Railway Traffic Management System Database Initialization
+-- This file will be executed when the PostgreSQL container starts
 
--- Example table to validate extension works (optional)
-CREATE TABLE IF NOT EXISTS sensor_readings (
-    id SERIAL PRIMARY KEY,
-    device_id TEXT NOT NULL,
-    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
-    value DOUBLE PRECISION NOT NULL
-);
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Create hypertable
-SELECT create_hypertable('sensor_readings', 'ts', if_not_exists => TRUE);
+-- Create the railway database if it doesn't exist
+-- Note: In Docker, the database is usually created via environment variables
+-- This is here for completeness
+
+-- Log successful initialization
+SELECT 'Railway Traffic Management Database extensions initialized successfully' AS status;
+
+-- The actual schema will be created by Alembic migrations
+-- Run: python setup_railway_db.py after container startup
