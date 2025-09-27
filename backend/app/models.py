@@ -277,6 +277,14 @@ class Conflict(Base):
     auto_resolved = Column(Boolean, nullable=False, default=False)
     resolved_by_controller_id = Column(Integer, ForeignKey('controllers.id'), nullable=True)
     resolution_notes = Column(Text, nullable=True)
+    
+    # AI-specific fields
+    ai_analyzed = Column(Boolean, nullable=False, default=False)
+    ai_confidence = Column(Numeric(5, 4), nullable=True)  # 0.0000 to 1.0000
+    ai_solution_id = Column(String(100), nullable=True)
+    ai_recommendations = Column(JSONB, nullable=True)
+    ai_analysis_time = Column(DateTime(timezone=True), nullable=True)
+    
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -308,6 +316,12 @@ class Conflict(Base):
             raise ValueError(f"Conflict type must be one of: {valid_types}")
         return conflict_type
     
+    @validates('ai_confidence')
+    def validate_ai_confidence(self, key, ai_confidence):
+        if ai_confidence is not None and (ai_confidence < 0.0 or ai_confidence > 1.0):
+            raise ValueError("AI confidence must be between 0.0 and 1.0")
+        return ai_confidence
+    
     def __repr__(self):
         return f"<Conflict(id={self.id}, type='{self.conflict_type}', severity='{self.severity}')>"
 
@@ -332,6 +346,13 @@ class Decision(Base):
     approval_required = Column(Boolean, nullable=False, default=False)
     approved_by_controller_id = Column(Integer, ForeignKey('controllers.id'), nullable=True)
     approval_time = Column(DateTime(timezone=True), nullable=True)
+    
+    # AI-specific fields
+    ai_generated = Column(Boolean, nullable=False, default=False)
+    ai_solver_method = Column(String(50), nullable=True)  # rule_based, constraint_programming, reinforcement_learning
+    ai_score = Column(Numeric(8, 4), nullable=True)  # AI optimization score
+    ai_confidence = Column(Numeric(5, 4), nullable=True)  # 0.0000 to 1.0000
+    
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     # Relationships
@@ -353,6 +374,20 @@ class Decision(Base):
             (approval_required = true AND approved_by_controller_id IS NOT NULL AND approval_time IS NOT NULL)
         """, name="decisions_approval_check"),
     )
+    
+    @validates('ai_solver_method')
+    def validate_ai_solver_method(self, key, ai_solver_method):
+        if ai_solver_method is not None:
+            valid_methods = ['rule_based', 'constraint_programming', 'reinforcement_learning']
+            if ai_solver_method not in valid_methods:
+                raise ValueError(f"AI solver method must be one of: {valid_methods}")
+        return ai_solver_method
+    
+    @validates('ai_confidence')
+    def validate_ai_confidence(self, key, ai_confidence):
+        if ai_confidence is not None and (ai_confidence < 0.0 or ai_confidence > 1.0):
+            raise ValueError("AI confidence must be between 0.0 and 1.0")
+        return ai_confidence
     
     def __repr__(self):
         return f"<Decision(id={self.id}, action='{self.action_taken}', controller_id={self.controller_id})>"

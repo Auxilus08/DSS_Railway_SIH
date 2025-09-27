@@ -18,3 +18,8 @@ aioredis
 slowapi
 python-dateutil
 geopy
+
+# AI Integration Dependencies
+numpy>=1.26.0
+asyncio
+ortools>=9.8.0  # Constraint programming optimization
