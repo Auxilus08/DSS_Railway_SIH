@@ -24,8 +24,12 @@ def test_database_connection():
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         
+        # Load environment variables
+        from dotenv import load_dotenv
+        load_dotenv('../.env')  # Load from parent directory
+        
         # Try to get database URL from environment or use default
-        database_url = os.getenv('DATABASE_URL', 'postgresql+psycopg2://postgres:postgres@localhost:5432/railway_db')
+        database_url = os.getenv('DATABASE_URL', 'postgresql+psycopg2://postgres:postgres@localhost:5432/appdb')
         
         print(f"   📡 Attempting connection to: {database_url.split('@')[1] if '@' in database_url else 'localhost'}")
         
