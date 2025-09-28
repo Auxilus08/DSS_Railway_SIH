@@ -309,7 +309,7 @@ def test_phase_2_ai_database():
                 "SELECT COUNT(*) FROM conflicts WHERE ai_confidence BETWEEN 0.0 AND 1.0 AND ai_analyzed = true"
             )).fetchone()[0],
             'json_structure': db.execute(text(
-                "SELECT COUNT(*) FROM conflicts WHERE ai_recommendations ? 'best_solver' AND ai_analyzed = true"
+                "SELECT COUNT(*) FROM conflicts WHERE json_extract(ai_recommendations, '$.best_solver') IS NOT NULL AND ai_analyzed = true"
             )).fetchone()[0],
             'decision_consistency': db.execute(text(
                 """SELECT COUNT(*) FROM decisions d 
