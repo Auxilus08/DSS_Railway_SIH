@@ -19,13 +19,12 @@ slowapi
 python-dateutil
 geopy
 
-# AI Integration Dependencies
+
 numpy>=1.26.0
 asyncio
-ortools>=9.8.0  # Constraint programming optimization
+ortools>=9.8.0
 
-# Add to production requirements.txt:
-scipy>=1.11.4              # Advanced math functions
-pandas>=2.0.0              # Data analysis for AI metrics  
-prometheus-client>=0.19.0   # AI metrics collection
-structlog>=23.2.0          # Better AI logging
+scipy>=1.11.4
+pandas>=2.0.0
+prometheus-client>=0.19.0
+structlog>=23.2.0
