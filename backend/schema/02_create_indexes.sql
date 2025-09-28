@@ -114,9 +114,75 @@ CREATE UNIQUE INDEX idx_trains_number_unique ON trains(train_number) WHERE opera
 CREATE UNIQUE INDEX idx_sections_code_unique ON sections(section_code) WHERE active = true;
 CREATE UNIQUE INDEX idx_controllers_employee_unique ON controllers(employee_id) WHERE active = true;
 
+-- Performance indexes specifically for conflict detection system
+-- Optimized for 500+ trains with sub-second detection time
+
+-- Conflict detection spatial queries
+CREATE INDEX idx_positions_spatial_detection ON positions(section_id, timestamp DESC, train_id)
+    WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '1 hour';
+
+-- Temporal conflict detection - overlapping time windows
+CREATE INDEX idx_positions_temporal_detection ON positions(train_id, section_id, timestamp)
+    WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '2 hours';
+
+-- Priority conflict detection - train priorities with sections
+CREATE INDEX idx_trains_priority_sections ON trains(priority DESC, current_section_id, type)
+    WHERE operational_status = 'active';
+
+-- Junction conflict detection - junction sections with capacity
+CREATE INDEX idx_sections_junctions ON sections(id, capacity, max_speed_kmh)
+    WHERE section_type = 'junction' AND active = true;
+
+-- Real-time conflict monitoring - recent positions with speed
+CREATE INDEX idx_positions_realtime_monitoring ON positions(timestamp DESC, section_id, speed_kmh)
+    WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '15 minutes';
+
+-- Train prediction queries - route sections with timing
+CREATE INDEX idx_train_schedules_prediction ON train_schedules(train_id, active)
+    INCLUDE (route_sections, scheduled_times)
+    WHERE active = true;
+
+-- Bulk train data loading optimization
+CREATE INDEX idx_trains_bulk_load ON trains(operational_status, id)
+    INCLUDE (train_number, type, priority, max_speed_kmh, capacity, current_load, current_section_id)
+    WHERE operational_status = 'active';
+
+-- Section occupancy for capacity checking
+CREATE INDEX idx_section_occupancy_capacity ON section_occupancy(section_id, exit_time)
+    WHERE exit_time IS NULL OR exit_time >= CURRENT_TIMESTAMP - INTERVAL '30 minutes';
+
+-- Conflict resolution tracking
+CREATE INDEX idx_conflicts_resolution_tracking ON conflicts(detection_time DESC, resolution_time)
+    INCLUDE (severity, trains_involved, sections_involved, auto_resolved);
+
+-- Performance monitoring indexes
+CREATE INDEX idx_positions_performance_monitoring ON positions(timestamp DESC)
+    INCLUDE (train_id, section_id, speed_kmh)
+    WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '1 hour';
+
+-- Emergency response indexes - critical conflicts
+CREATE INDEX idx_conflicts_emergency ON conflicts(severity, detection_time DESC)
+    WHERE severity IN ('high', 'critical') AND resolution_time IS NULL;
+
 -- Statistics targets for better query planning
 ALTER TABLE positions ALTER COLUMN timestamp SET STATISTICS 1000;
 ALTER TABLE positions ALTER COLUMN train_id SET STATISTICS 1000;
 ALTER TABLE conflicts ALTER COLUMN detection_time SET STATISTICS 1000;
 ALTER TABLE trains ALTER COLUMN current_section_id SET STATISTICS 1000;
 ALTER TABLE sections ALTER COLUMN id SET STATISTICS 1000;
+
+-- Enable parallel query execution for large datasets
+ALTER TABLE positions SET (parallel_workers = 4);
+ALTER TABLE trains SET (parallel_workers = 2);
+ALTER TABLE conflicts SET (parallel_workers = 2);
+
+-- Optimize autovacuum for high-frequency tables
+ALTER TABLE positions SET (
+    autovacuum_vacuum_scale_factor = 0.1,
+    autovacuum_analyze_scale_factor = 0.05
+);
+
+ALTER TABLE conflicts SET (
+    autovacuum_vacuum_scale_factor = 0.2,
+    autovacuum_analyze_scale_factor = 0.1
+);

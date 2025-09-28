@@ -44,6 +44,17 @@ def get_session():
     return Session()
 
 
+def get_db():
+    """Dependency to get database session for FastAPI"""
+    engine = get_engine()
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def init_database():
     """Initialize database with extensions and basic setup"""
     engine = get_engine()

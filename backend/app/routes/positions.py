@@ -4,8 +4,8 @@ Real-time train position updates and retrieval
 """
 
 from datetime import datetime, timedelta
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from typing import List, Optional, Tuple
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 from ..db import get_session
@@ -14,6 +14,20 @@ from ..schemas import (
     PositionUpdate, BulkPositionUpdate, PositionResponse, 
     APIResponse, ErrorResponse, PositionBroadcast
 )
+
+
+def parse_wkt_coordinates(wkt_string: Optional[str]) -> Tuple[float, float]:
+    """Parse WKT POINT string to extract latitude and longitude"""
+    if not wkt_string:
+        return 0.0, 0.0
+    
+    try:
+        # Format: "POINT(longitude latitude)"
+        coords_part = wkt_string.split('(')[1].rstrip(')')
+        longitude, latitude = coords_part.split()
+        return float(latitude), float(longitude)
+    except (IndexError, ValueError):
+        return 0.0, 0.0
 from ..auth import get_current_active_controller
 from ..redis_client import get_redis, RedisClient
 from ..websocket_manager import connection_manager
@@ -110,33 +124,33 @@ async def store_position_update(
 
 
 async def broadcast_position_update(
-    train: Train,
-    position: Position,
-    section: Section,
+    train_id: int,
+    train_number: str,
+    train_type: str,
+    position_data: dict,
+    section_id: int,
+    section_code: str,
+    section_name: str,
     redis_client: RedisClient
 ):
     """Broadcast position update via WebSocket and Redis pub/sub"""
     
     position_broadcast = PositionBroadcast(
-        train_id=train.id,
-        train_number=train.train_number,
-        train_type=train.type,
+        train_id=train_id,
+        train_number=train_number,
+        train_type=train_type,
         position=PositionResponse(
-            train_id=position.train_id,
-            section_id=position.section_id,
-            section_code=section.section_code,
-            section_name=section.name,
-            coordinates={
-                "latitude": position.coordinates.y if position.coordinates else 0,
-                "longitude": position.coordinates.x if position.coordinates else 0,
-                "altitude": position.altitude
-            },
-            speed_kmh=float(position.speed_kmh),
-            heading=float(position.direction) if position.direction else 0,
-            timestamp=position.timestamp,
-            distance_from_start=float(position.distance_from_start) if position.distance_from_start else None,
-            signal_strength=position.signal_strength,
-            gps_accuracy=float(position.gps_accuracy) if position.gps_accuracy else None
+            train_id=position_data["train_id"],
+            section_id=section_id,
+            section_code=section_code,
+            section_name=section_name,
+            coordinates=position_data["coordinates"],
+            speed_kmh=position_data["speed_kmh"],
+            heading=position_data["heading"],
+            timestamp=position_data["timestamp"],
+            distance_from_start=position_data.get("distance_from_start"),
+            signal_strength=position_data.get("signal_strength"),
+            gps_accuracy=position_data.get("gps_accuracy")
         ),
         timestamp=datetime.utcnow()
     )
@@ -151,7 +165,7 @@ async def broadcast_position_update(
 @router.post("/position", response_model=APIResponse)
 @limiter.limit("1000/minute")
 async def update_train_position(
-    request,
+    request: Request,
     position_update: PositionUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_session),
@@ -195,9 +209,26 @@ async def update_train_position(
             db.commit()
         
         # Broadcast update in background
+        position_data = {
+            "train_id": position.train_id,
+            "coordinates": {
+                "latitude": parse_wkt_coordinates(position.coordinates)[0],
+                "longitude": parse_wkt_coordinates(position.coordinates)[1],
+                "altitude": position.altitude
+            },
+            "speed_kmh": float(position.speed_kmh),
+            "heading": float(position.direction) if position.direction else 0,
+            "timestamp": position.timestamp,
+            "distance_from_start": float(position.distance_from_start) if position.distance_from_start else None,
+            "signal_strength": position.signal_strength,
+            "gps_accuracy": float(position.gps_accuracy) if position.gps_accuracy else None
+        }
+        
         background_tasks.add_task(
             broadcast_position_update,
-            train, position, section, redis_client
+            train.id, train.train_number, train.type,
+            position_data, section.id, section.section_code, section.name,
+            redis_client
         )
         
         # Increment performance counter
@@ -226,7 +257,7 @@ async def update_train_position(
 @router.post("/position/bulk", response_model=APIResponse)
 @limiter.limit("100/minute")
 async def bulk_update_positions(
-    request,
+    request: Request,
     bulk_update: BulkPositionUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_session),
@@ -266,9 +297,26 @@ async def bulk_update_positions(
                 })
                 
                 # Broadcast update in background
+                position_data = {
+                    "train_id": position.train_id,
+                    "coordinates": {
+                        "latitude": parse_wkt_coordinates(position.coordinates)[0],
+                        "longitude": parse_wkt_coordinates(position.coordinates)[1],
+                        "altitude": position.altitude
+                    },
+                    "speed_kmh": float(position.speed_kmh),
+                    "heading": float(position.direction) if position.direction else 0,
+                    "timestamp": position.timestamp,
+                    "distance_from_start": float(position.distance_from_start) if position.distance_from_start else None,
+                    "signal_strength": position.signal_strength,
+                    "gps_accuracy": float(position.gps_accuracy) if position.gps_accuracy else None
+                }
+                
                 background_tasks.add_task(
                     broadcast_position_update,
-                    train, position, section, redis_client
+                    train.id, train.train_number, train.type,
+                    position_data, section.id, section.section_code, section.name,
+                    redis_client
                 )
             
             except Exception as e:
@@ -364,8 +412,8 @@ async def get_train_position(
         
         # Build response
         coordinates = {
-            "latitude": position.coordinates.y if position.coordinates else 0,
-            "longitude": position.coordinates.x if position.coordinates else 0,
+            "latitude": parse_wkt_coordinates(position.coordinates)[0],
+            "longitude": parse_wkt_coordinates(position.coordinates)[1],
             "altitude": position.altitude
         }
         
@@ -452,8 +500,8 @@ async def get_train_position_history(
             section = db.query(Section).filter(Section.id == position.section_id).first()
             
             coordinates = {
-                "latitude": position.coordinates.y if position.coordinates else 0,
-                "longitude": position.coordinates.x if position.coordinates else 0,
+                "latitude": parse_wkt_coordinates(position.coordinates)[0],
+                "longitude": parse_wkt_coordinates(position.coordinates)[1],
                 "altitude": position.altitude
             }
             

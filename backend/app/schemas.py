@@ -193,6 +193,20 @@ class ControllerResponse(ControllerBase):
     active: bool
     created_at: datetime
 
+    @field_validator('section_responsibility', mode='before')
+    @classmethod
+    def parse_section_responsibility(cls, v):
+        """Handle both JSON string and list formats for SQLite compatibility"""
+        if isinstance(v, str) and v:
+            import json
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        elif isinstance(v, list):
+            return v
+        return [] if v is None else v
+
     class Config:
         from_attributes = True
 
