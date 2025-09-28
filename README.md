@@ -106,10 +106,10 @@ cd backend/test_scripts && python performance_test.py
 - **Database Guide**: [backend/RAILWAY_README.md](backend/RAILWAY_README.md)
 - **API Reference**: [backend/API_DOCUMENTATION.md](backend/API_DOCUMENTATION.md)
 
-## 🏆 Smart India Hackathon 2024
+## 🏆 Smart India Hackathon 2025
 
-Developed for SIH 2024, addressing railway traffic management modernization with real-time monitoring and intelligent conflict resolution.
+Developed for SIH 2025, addressing railway traffic management modernization with real-time monitoring and intelligent conflict resolution.
 
 ---
 
-**Built with ❤️ for Smart India Hackathon 2024**
+**Built with ❤️ for Smart India Hackathon 2025**
