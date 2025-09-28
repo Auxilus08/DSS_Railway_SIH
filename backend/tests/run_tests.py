@@ -45,7 +45,7 @@ def run_test_category(category: str, verbose: bool = False):
                 cwd=str(backend_dir),
                 capture_output=not verbose,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=120  # 2 minute timeout
             )
             
             if result.returncode == 0:
