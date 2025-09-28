@@ -24,7 +24,9 @@ from railway_optimization import OptimizationEngine, Conflict
 
 def test_phase_2_integration():
     """Complete Phase 2 integration test"""
-    database_url = "postgresql+psycopg2://postgres:1234@localhost:5432/railway_db"
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL environment variable not set. Please set it to your database connection string.")
     
     print("🚀 Phase 2 Integration Test - AI Engine + Database")
     print("=" * 60)
