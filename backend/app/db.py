@@ -45,9 +45,9 @@ def get_session():
 
 
 def get_db():
-    """FastAPI dependency for database sessions"""
+    """Dependency to get database session for FastAPI"""
     engine = get_engine()
-    SessionLocal = sessionmaker(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
     try:
         yield db

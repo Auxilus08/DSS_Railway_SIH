@@ -127,9 +127,26 @@ async def get_sections_status(
             query = query.filter(Section.section_type == section_type)
         
         # Check controller permissions for section access
-        if controller.section_responsibility and controller.auth_level.value not in ["manager", "admin"]:
-            # Filter to only sections the controller is responsible for
-            query = query.filter(Section.id.in_(controller.section_responsibility))
+        if hasattr(controller, 'section_responsibility') and controller.section_responsibility:
+            # Handle auth_level checking
+            auth_level_val = getattr(controller, 'auth_level', None)
+            if hasattr(auth_level_val, 'value'):
+                auth_level_str = auth_level_val.value
+            else:
+                auth_level_str = str(auth_level_val) if auth_level_val else 'operator'
+            
+            if auth_level_str not in ["MANAGER", "ADMIN"]:
+                # Filter to only sections the controller is responsible for
+                # Handle both array and JSON string formats
+                responsibility = controller.section_responsibility
+                if isinstance(responsibility, str):
+                    # For SQLite test model (JSON string)
+                    import json
+                    try:
+                        responsibility = json.loads(responsibility)
+                    except:
+                        responsibility = []
+                query = query.filter(Section.id.in_(responsibility))
         
         sections = query.order_by(Section.section_code).all()
         
@@ -164,7 +181,7 @@ async def get_sections_status(
                 ).count()
                 
                 utilization_percentage = (current_occupancy / section.capacity * 100) if section.capacity > 0 else 0
-                status = await calculate_section_status(section, db)
+                section_status_val = await calculate_section_status(section, db)
                 trains_present = await get_section_trains(section.id, db)
                 
                 section_response = SectionResponse(
@@ -186,7 +203,7 @@ async def get_sections_status(
                     current_occupancy=current_occupancy,
                     utilization_percentage=utilization_percentage,
                     trains_present=trains_present,
-                    status=status
+                    status=section_status_val
                 )
                 
                 # Cache the status
@@ -238,14 +255,31 @@ async def get_section_status(
                 detail=f"Section with ID {section_id} not found"
             )
         
-        # Check controller permissions
-        if (controller.section_responsibility and 
-            controller.auth_level.value not in ["manager", "admin"] and
-            section_id not in controller.section_responsibility):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to access this section"
-            )
+        # Check controller permissions  
+        if hasattr(controller, 'section_responsibility') and controller.section_responsibility:
+            # Handle auth_level checking
+            auth_level_val = getattr(controller, 'auth_level', None)
+            if hasattr(auth_level_val, 'value'):
+                auth_level_str = auth_level_val.value
+            else:
+                auth_level_str = str(auth_level_val) if auth_level_val else 'operator'
+            
+            # Handle both array and JSON string formats
+            responsibility = controller.section_responsibility
+            if isinstance(responsibility, str):
+                # For SQLite test model (JSON string)
+                import json
+                try:
+                    responsibility = json.loads(responsibility)
+                except:
+                    responsibility = []
+            
+            if (auth_level_str not in ["MANAGER", "ADMIN"] and
+                section_id not in responsibility):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions to access this section"
+                )
         
         # Try cache first
         cache_key = f"section:status:{section_id}"
@@ -263,7 +297,7 @@ async def get_section_status(
         ).count()
         
         utilization_percentage = (current_occupancy / section.capacity * 100) if section.capacity > 0 else 0
-        status = await calculate_section_status(section, db)
+        section_status_val = await calculate_section_status(section, db)
         trains_present = await get_section_trains(section_id, db)
         
         section_response = SectionResponse(
@@ -285,7 +319,7 @@ async def get_section_status(
             current_occupancy=current_occupancy,
             utilization_percentage=utilization_percentage,
             trains_present=trains_present,
-            status=status
+            status=section_status_val
         )
         
         # Cache the status
@@ -326,14 +360,31 @@ async def get_section_occupancy_history(
                 detail=f"Section with ID {section_id} not found"
             )
         
-        # Check controller permissions
-        if (controller.section_responsibility and 
-            controller.auth_level.value not in ["manager", "admin"] and
-            section_id not in controller.section_responsibility):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to access this section"
-            )
+        # Check controller permissions (occupancy history)
+        if hasattr(controller, 'section_responsibility') and controller.section_responsibility:
+            # Handle auth_level checking
+            auth_level_val = getattr(controller, 'auth_level', None)
+            if hasattr(auth_level_val, 'value'):
+                auth_level_str = auth_level_val.value
+            else:
+                auth_level_str = str(auth_level_val) if auth_level_val else 'operator'
+            
+            # Handle both array and JSON string formats
+            responsibility = controller.section_responsibility
+            if isinstance(responsibility, str):
+                # For SQLite test model (JSON string)
+                import json
+                try:
+                    responsibility = json.loads(responsibility)
+                except:
+                    responsibility = []
+            
+            if (auth_level_str not in ["MANAGER", "ADMIN"] and
+                section_id not in responsibility):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions to access this section"
+                )
         
         # Calculate time range
         end_time = datetime.utcnow()
@@ -430,9 +481,26 @@ async def list_sections(
         if section_type:
             query = query.filter(Section.section_type == section_type)
         
-        # Apply controller permissions
-        if controller.section_responsibility and controller.auth_level.value not in ["manager", "admin"]:
-            query = query.filter(Section.id.in_(controller.section_responsibility))
+        # Apply controller permissions (list sections)
+        if hasattr(controller, 'section_responsibility') and controller.section_responsibility:
+            # Handle auth_level checking
+            auth_level_val = getattr(controller, 'auth_level', None)
+            if hasattr(auth_level_val, 'value'):
+                auth_level_str = auth_level_val.value
+            else:
+                auth_level_str = str(auth_level_val) if auth_level_val else 'operator'
+            
+            if auth_level_str not in ["MANAGER", "ADMIN"]:
+                # Handle both array and JSON string formats
+                responsibility = controller.section_responsibility
+                if isinstance(responsibility, str):
+                    # For SQLite test model (JSON string)
+                    import json
+                    try:
+                        responsibility = json.loads(responsibility)
+                    except:
+                        responsibility = []
+                query = query.filter(Section.id.in_(responsibility))
         
         sections = query.order_by(Section.section_code).all()
         
