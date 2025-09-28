@@ -4,21 +4,22 @@ Tests the complete integration of Railway AI optimization with database storage
 """
 import os
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import uuid
 import json
 
-# Add the app directory to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
+# Add the app directory to the Python path using robust absolute path resolution
+sys.path.append(str((Path(__file__).parent / 'app').resolve()))
 
 from app.models import Base, Train, Section, Conflict, Decision, Controller
 from app.models import ControllerAuthLevel, ConflictSeverity, DecisionAction, TrainType
 from app.services.ai_service import AIOptimizationService
 
-# Add the main directory for railway optimization
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Add the main directory for railway optimization using robust absolute path resolution
+sys.path.append(str((Path(__file__).parent / '..' / '..').resolve()))
 from railway_optimization import OptimizationEngine, Conflict
 
 def test_phase_2_integration():
