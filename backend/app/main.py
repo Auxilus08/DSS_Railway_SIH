@@ -16,7 +16,7 @@ from .websocket_manager import connection_manager
 from .schemas import HealthResponse, PerformanceMetrics, APIResponse
 
 # Import route modules
-from .routes import auth, positions, sections, websocket
+from .routes import auth, positions, sections, websocket, ai
 
 # Configure logging
 logging.basicConfig(
@@ -117,6 +117,7 @@ app.include_router(auth.router)
 app.include_router(positions.router)
 app.include_router(sections.router)
 app.include_router(websocket.router)
+app.include_router(ai.router)  # AI optimization routes
 
 # Health check endpoints
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])

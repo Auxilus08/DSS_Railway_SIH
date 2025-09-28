@@ -124,6 +124,14 @@ async def get_current_active_controller(
     return current_controller
 
 
+# Alias for compatibility with existing code
+async def get_current_user(
+    current_controller: Controller = Depends(get_current_active_controller)
+) -> Controller:
+    """Get current authenticated user (controller) - alias for compatibility"""
+    return current_controller
+
+
 def check_controller_permissions(
     controller: Controller,
     required_sections: Optional[list] = None,

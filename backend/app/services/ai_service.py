@@ -56,7 +56,7 @@ class AIOptimizationService:
         self.config = config or AIConfig()
         
         # Initialize AI components if enabled
-        if self.config.ai_enabled:
+        if self.config.ENABLE_AI_OPTIMIZATION:
             self.optimization_engine = OptimizationEngine()
             self.adapter = RailwayAIAdapter(enable_ai=True)
             self.data_mapper = DataMapper()
@@ -67,7 +67,7 @@ class AIOptimizationService:
     
     def is_ai_enabled(self) -> bool:
         """Check if AI optimization is enabled"""
-        return self.config.ai_enabled and self.optimization_engine is not None
+        return self.config.ENABLE_AI_OPTIMIZATION and self.optimization_engine is not None
     
     async def optimize_conflict(
         self, 
