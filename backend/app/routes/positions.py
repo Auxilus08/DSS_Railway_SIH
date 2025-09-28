@@ -416,7 +416,6 @@ async def update_train_position(
             check_for_conflicts_and_optimize,
             train, position, section, db, redis_client
         )
-        
         # Increment performance counter
         await redis_client.increment_counter("position_updates_total")
         
