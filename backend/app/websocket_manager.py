@@ -27,6 +27,10 @@ class ConnectionManager:
         # Subscriptions by section ID
         self.section_subscriptions: Dict[int, Set[str]] = {}
         
+        # Phase 4: AI-specific subscriptions
+        self.ai_subscribers: Set[str] = set()
+        self.ai_training_subscribers: Set[str] = set()
+        
         # General subscribers (all updates)
         self.general_subscribers: Set[str] = set()
         
@@ -74,6 +78,10 @@ class ConnectionManager:
         
         # Remove from all subscriptions
         self.general_subscribers.discard(connection_id)
+        
+        # Phase 4: Remove from AI subscriptions
+        self.ai_subscribers.discard(connection_id)
+        self.ai_training_subscribers.discard(connection_id)
         
         for train_id in list(self.train_subscriptions.keys()):
             self.train_subscriptions[train_id].discard(connection_id)
@@ -184,6 +192,34 @@ class ConnectionManager:
         self.general_subscribers.discard(connection_id)
         logger.info(f"Connection {connection_id} unsubscribed from all updates")
     
+    def subscribe_to_ai_updates(self, connection_id: str):
+        """
+        Phase 4: Subscribe connection to AI optimization updates
+        """
+        self.ai_subscribers.add(connection_id)
+        logger.info(f"Connection {connection_id} subscribed to AI updates")
+    
+    def unsubscribe_from_ai_updates(self, connection_id: str):
+        """
+        Phase 4: Unsubscribe connection from AI optimization updates
+        """
+        self.ai_subscribers.discard(connection_id)
+        logger.info(f"Connection {connection_id} unsubscribed from AI updates")
+    
+    def subscribe_to_ai_training(self, connection_id: str):
+        """
+        Phase 4: Subscribe connection to AI training updates
+        """
+        self.ai_training_subscribers.add(connection_id)
+        logger.info(f"Connection {connection_id} subscribed to AI training updates")
+    
+    def unsubscribe_from_ai_training(self, connection_id: str):
+        """
+        Phase 4: Unsubscribe connection from AI training updates
+        """
+        self.ai_training_subscribers.discard(connection_id)
+        logger.info(f"Connection {connection_id} unsubscribed from AI training updates")
+    
     # Broadcasting methods
     async def broadcast_position_update(self, position_broadcast: PositionBroadcast):
         """Broadcast train position update"""
@@ -211,6 +247,46 @@ class ConnectionManager:
         
         await self.broadcast_to_all(message.dict())
     
+    async def broadcast_ai_update(self, ai_data: Dict[str, Any]):
+        """
+        Phase 4: Broadcast AI optimization results
+        Real-time AI notifications for conflict resolution
+        """
+        message = WebSocketMessage(
+            type="ai_optimization",
+            data=ai_data
+        )
+        
+        # Send to AI subscribers
+        await self.broadcast_to_subscribers(message.dict(), self.ai_subscribers)
+        
+        # Also send to general subscribers
+        await self.broadcast_to_subscribers(message.dict(), self.general_subscribers)
+        
+        # Send to specific train/section subscribers if applicable
+        train_id = ai_data.get("train_id")
+        if train_id and train_id in self.train_subscriptions:
+            await self.broadcast_to_subscribers(message.dict(), self.train_subscriptions[train_id])
+        
+        section_id = ai_data.get("section_id")
+        if section_id and section_id in self.section_subscriptions:
+            await self.broadcast_to_subscribers(message.dict(), self.section_subscriptions[section_id])
+    
+    async def broadcast_ai_training_update(self, training_data: Dict[str, Any]):
+        """
+        Phase 4: Broadcast AI training progress updates
+        """
+        message = WebSocketMessage(
+            type="ai_training",
+            data=training_data
+        )
+        
+        # Send to AI training subscribers
+        await self.broadcast_to_subscribers(message.dict(), self.ai_training_subscribers)
+        
+        # Also send to general subscribers
+        await self.broadcast_to_subscribers(message.dict(), self.general_subscribers)
+    
     async def broadcast_system_status(self, status_data: Dict[str, Any]):
         """Broadcast system status update"""
         message = WebSocketMessage(
@@ -229,7 +305,10 @@ class ConnectionManager:
             "train_subscriptions": len(self.train_subscriptions),
             "section_subscriptions": len(self.section_subscriptions),
             "active_train_subscriptions": sum(len(subs) for subs in self.train_subscriptions.values()),
-            "active_section_subscriptions": sum(len(subs) for subs in self.section_subscriptions.values())
+            "active_section_subscriptions": sum(len(subs) for subs in self.section_subscriptions.values()),
+            # Phase 4: AI subscription stats
+            "ai_subscribers": len(self.ai_subscribers),
+            "ai_training_subscribers": len(self.ai_training_subscribers)
         }
     
     # Message handling
@@ -271,6 +350,35 @@ class ConnectionManager:
                 await self.send_personal_message({
                     "type": "subscription_confirmed",
                     "data": {"scope": "all"}
+                }, connection_id)
+            
+            # Phase 4: AI subscription handlers
+            elif message_type == "subscribe_ai":
+                self.subscribe_to_ai_updates(connection_id)
+                await self.send_personal_message({
+                    "type": "subscription_confirmed",
+                    "data": {"scope": "ai_updates"}
+                }, connection_id)
+            
+            elif message_type == "unsubscribe_ai":
+                self.unsubscribe_from_ai_updates(connection_id)
+                await self.send_personal_message({
+                    "type": "unsubscription_confirmed",
+                    "data": {"scope": "ai_updates"}
+                }, connection_id)
+            
+            elif message_type == "subscribe_ai_training":
+                self.subscribe_to_ai_training(connection_id)
+                await self.send_personal_message({
+                    "type": "subscription_confirmed",
+                    "data": {"scope": "ai_training"}
+                }, connection_id)
+            
+            elif message_type == "unsubscribe_ai_training":
+                self.unsubscribe_from_ai_training(connection_id)
+                await self.send_personal_message({
+                    "type": "unsubscription_confirmed",
+                    "data": {"scope": "ai_training"}
                 }, connection_id)
             
             elif message_type == "ping":
