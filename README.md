@@ -2,6 +2,7 @@
 
 A comprehensive, production-ready Railway Traffic Management System built for real-time train tracking, conflict detection, and traffic optimization. Developed for Smart India Hackathon (SIH).
 
+
 ## 🎯 Features
 
 - **Real-time Train Tracking**: GPS-based position monitoring with WebSocket updates
@@ -10,6 +11,11 @@ A comprehensive, production-ready Railway Traffic Management System built for re
 - **Controller Dashboard**: Role-based access control for traffic controllers
 - **Decision Audit Trail**: Complete logging of all controller decisions
 - **Performance Analytics**: Network utilization and efficiency metrics
+
+
+# 🚆 Low Fidelity UI 
+[Image](https://drive.google.com/file/d/1I-xOgjKBz5HkLgsXaEXMkULpQPMaCrIX/view?usp=sharing3)
+
 
 ## 🛠 Tech Stack
 
