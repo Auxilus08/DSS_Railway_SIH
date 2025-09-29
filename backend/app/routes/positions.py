@@ -38,6 +38,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Phase 4: Import AI components for automatic conflict detection
+try:
+    from ..railway_optimization import OptimizationEngine
+    from ..railway_adapter import RailwayAIAdapter
+    from ..models import Conflict, Decision
+    AI_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"AI components not available for automatic conflict detection: {e}")
+    AI_AVAILABLE = False
+
 router = APIRouter(prefix="/api/trains", tags=["Position Tracking"])
 
 # Rate limiter
@@ -162,6 +172,176 @@ async def broadcast_position_update(
     await redis_client.publish("railway:positions", position_broadcast.dict())
 
 
+async def check_for_conflicts_and_optimize(
+    train: Train,
+    position: Position,
+    section: Section,
+    db: Session,
+    redis_client: RedisClient
+):
+    """
+    Phase 4: Automatic conflict detection and AI optimization
+    Check for potential conflicts when train position updates
+    """
+    if not AI_AVAILABLE:
+        return
+    
+    try:
+        # Check for high-risk scenarios that need AI optimization
+        should_trigger_ai = False
+        conflict_reasons = []
+        
+        # 1. High speed in congested section
+        if position.speed_kmh > 80 and section.capacity_utilization > 0.8:
+            should_trigger_ai = True
+            conflict_reasons.append("High speed in congested section")
+        
+        # 2. Multiple trains in same section
+        recent_positions = db.query(Position).filter(
+            Position.section_id == section.id,
+            Position.train_id != train.id,
+            Position.timestamp >= datetime.utcnow() - timedelta(minutes=5)
+        ).count()
+        
+        if recent_positions > 0:
+            should_trigger_ai = True
+            conflict_reasons.append(f"Multiple trains detected in section {section.section_code}")
+        
+        # 3. Check for existing unresolved conflicts in this section
+        unresolved_conflicts = db.query(Conflict).filter(
+            Conflict.section_id == section.id,
+            Conflict.status.in_(["active", "pending"]),
+            Conflict.severity.in_(["high", "critical"])
+        ).count()
+        
+        if unresolved_conflicts > 0:
+            should_trigger_ai = True
+            conflict_reasons.append(f"Unresolved conflicts in section")
+        
+        # If AI optimization is needed, trigger it
+        if should_trigger_ai:
+            logger.info(f"Triggering AI optimization for train {train.train_number}: {', '.join(conflict_reasons)}")
+            
+            # Create or update conflict record
+            conflict = Conflict(
+                train_id=train.id,
+                section_id=section.id,
+                conflict_type="position_based",
+                severity="high" if len(conflict_reasons) > 1 else "medium",
+                description=f"Automatic conflict detection: {'; '.join(conflict_reasons)}",
+                coordinates=position.coordinates,
+                detected_at=datetime.utcnow(),
+                status="active",
+                # Phase 4: Mark for AI processing
+                ai_analyzed=False,
+                priority=8 if len(conflict_reasons) > 1 else 6
+            )
+            
+            db.add(conflict)
+            db.commit()
+            db.refresh(conflict)
+            
+            # Initialize AI components
+            try:
+                optimizer = OptimizationEngine()
+                adapter = RailwayAIAdapter()
+                
+                # Get conflict data for AI processing
+                conflict_data = {
+                    "conflict_id": conflict.id,
+                    "train_id": train.id,
+                    "section_id": section.id,
+                    "severity": conflict.severity,
+                    "conflict_type": conflict.conflict_type,
+                    "current_speed": float(position.speed_kmh),
+                    "section_capacity": section.capacity_utilization,
+                    "reasons": conflict_reasons
+                }
+                
+                # Run AI optimization
+                ai_result = await adapter.optimize_conflict(conflict_data)
+                
+                if ai_result and ai_result.get("success"):
+                    # Update conflict with AI results
+                    conflict.ai_analyzed = True
+                    conflict.ai_confidence = ai_result.get("confidence", 0.8)
+                    conflict.ai_solution_id = ai_result.get("solution_id", f"auto_{conflict.id}")
+                    conflict.ai_recommendations = ai_result.get("recommendations", {})
+                    conflict.ai_analysis_time = datetime.utcnow()
+                    
+                    # Create AI-generated decision
+                    if "decision" in ai_result:
+                        decision = Decision(
+                            conflict_id=conflict.id,
+                            controller_id=None,  # AI-generated
+                            decision_type="ai_optimization",
+                            action=ai_result["decision"]["action"],
+                            reasoning=ai_result["decision"]["reasoning"],
+                            implemented=False,
+                            # Phase 4: AI decision fields
+                            ai_generated=True,
+                            ai_solver_method=ai_result.get("solver_method", "rule_based"),
+                            ai_score=ai_result.get("optimization_score", 0.8),
+                            ai_confidence=ai_result.get("confidence", 0.8)
+                        )
+                        
+                        db.add(decision)
+                    
+                    db.commit()
+                    
+                    # Broadcast AI optimization result
+                    await broadcast_ai_optimization_result(
+                        conflict, ai_result, redis_client
+                    )
+                    
+                    logger.info(f"AI optimization completed for conflict {conflict.id}")
+                    
+            except Exception as ai_error:
+                logger.error(f"AI optimization error for train {train.train_number}: {ai_error}")
+                # Mark conflict as AI processing failed
+                conflict.ai_analyzed = True
+                conflict.ai_confidence = 0.0
+                conflict.ai_recommendations = {"error": str(ai_error)}
+                db.commit()
+        
+    except Exception as e:
+        logger.error(f"Error in automatic conflict detection: {e}")
+
+
+async def broadcast_ai_optimization_result(
+    conflict: Conflict,
+    ai_result: dict,
+    redis_client: RedisClient
+):
+    """
+    Phase 4: Broadcast AI optimization results via WebSocket
+    """
+    try:
+        ai_broadcast = {
+            "type": "ai_optimization",
+            "conflict_id": conflict.id,
+            "train_id": conflict.train_id,
+            "section_id": conflict.section_id,
+            "severity": conflict.severity,
+            "ai_solution": ai_result,
+            "timestamp": datetime.utcnow().isoformat(),
+            "confidence": ai_result.get("confidence", 0.0),
+            "solver_method": ai_result.get("solver_method", "unknown")
+        }
+        
+        # Broadcast via WebSocket
+        await connection_manager.broadcast_ai_update(ai_broadcast)
+        
+        # Cache AI result in Redis
+        await redis_client.cache_ai_result(conflict.id, ai_result)
+        
+        # Publish to Redis pub/sub
+        await redis_client.publish("railway:ai_optimizations", ai_broadcast)
+        
+    except Exception as e:
+        logger.error(f"Error broadcasting AI optimization result: {e}")
+
+
 @router.post("/position", response_model=APIResponse)
 @limiter.limit("1000/minute")
 async def update_train_position(
@@ -231,6 +411,11 @@ async def update_train_position(
             redis_client
         )
         
+        # Phase 4: Check for conflicts and trigger AI optimization if needed
+        background_tasks.add_task(
+            check_for_conflicts_and_optimize,
+            train, position, section, db, redis_client
+        )
         # Increment performance counter
         await redis_client.increment_counter("position_updates_total")
         

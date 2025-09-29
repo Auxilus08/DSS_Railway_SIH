@@ -16,9 +16,14 @@ from .websocket_manager import connection_manager
 from .schemas import HealthResponse, PerformanceMetrics, APIResponse
 
 # Import route modules
-from .routes import auth, positions, sections, websocket
+# <<<<<<< main
+from .routes import auth, positions, sections, websocket, ai
 from .conflict_scheduler import start_conflict_detection, stop_conflict_detection, get_conflict_detection_status, run_manual_conflict_detection
+# =======
+# from .routes import auth, positions, sections, websocket
+# from .conflict_scheduler import start_conflict_detection, stop_conflict_detection, get_conflict_detection_status, run_manual_conflict_detection
 
+# >>>>>>> main
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +131,7 @@ app.include_router(auth.router)
 app.include_router(positions.router)
 app.include_router(sections.router)
 app.include_router(websocket.router)
+app.include_router(ai.router)  # AI optimization routes
 
 # Health check endpoints
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
