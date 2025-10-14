@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from sqlalchemy.orm import Session
 from .db import get_session
 from .models import Controller
@@ -20,21 +20,25 @@ SECRET_KEY = os.getenv("JWT_SECRET", "railway-secret-key-change-in-production")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRES_IN", "3600")) // 60
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # HTTP Bearer token scheme
 security = HTTPBearer()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against its hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password:
+        return False
+    password_bytes = plain_password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 def get_password_hash(password: str) -> str:
     """Generate password hash"""
-    return pwd_context.hash(password)
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -76,14 +80,15 @@ def authenticate_controller(db: Session, employee_id: str, password: str) -> Opt
     if not controller:
         return None
     
-    # For demo purposes, we'll use a simple password check
-    # In production, you'd have proper password hashing
-    demo_password = f"password_{employee_id}"  # Demo password pattern
+    # Check if controller has a password hash
+    if not controller.password_hash:
+        return None
     
-    if password == demo_password:
-        return controller
+    # Verify password
+    if not verify_password(password, controller.password_hash):
+        return None
     
-    return None
+    return controller
 
 
 async def get_current_controller(

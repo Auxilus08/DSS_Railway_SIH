@@ -77,6 +77,7 @@ class Controller(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     employee_id = Column(String(20), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=True)  # Password hash for authentication
     section_responsibility = Column(ARRAY(Integer), nullable=True)
     auth_level = Column(controller_auth_level_enum, nullable=False, default=ControllerAuthLevel.OPERATOR)
     active = Column(Boolean, nullable=False, default=True)

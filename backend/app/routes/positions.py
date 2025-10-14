@@ -54,6 +54,58 @@ router = APIRouter(prefix="/api/trains", tags=["Position Tracking"])
 limiter = Limiter(key_func=get_remote_address)
 
 
+@router.get("", response_model=List[dict])
+async def list_trains(
+    db: Session = Depends(get_session),
+    skip: int = 0,
+    limit: int = 100
+):
+    """
+    Get list of all trains with their latest positions
+    """
+    try:
+        trains = db.query(Train).offset(skip).limit(limit).all()
+        
+        result = []
+        for train in trains:
+            try:
+                # Get latest position
+                latest_position = db.query(Position).filter(
+                    Position.train_id == train.id
+                ).order_by(desc(Position.timestamp)).first()
+                
+                train_data = {
+                    "id": train.id,
+                    "train_number": str(train.train_number),
+                    "type": str(train.type) if train.type else "UNKNOWN",
+                    "origin_section_id": train.origin_section_id,
+                    "destination_section_id": train.destination_section_id,
+                    "current_section_id": train.current_section_id,
+                    "operational_status": str(train.operational_status) if train.operational_status else "UNKNOWN",
+                    "priority_level": train.priority_level,
+                    "capacity": train.capacity,
+                    "created_at": train.created_at.isoformat() if train.created_at else None
+                }
+                
+                if latest_position:
+                    lat, lon = parse_wkt_coordinates(latest_position.coordinates)
+                    train_data["latest_position"] = {
+                        "coordinates": {"latitude": lat, "longitude": lon},
+                        "speed_kmh": float(latest_position.speed_kmh) if latest_position.speed_kmh else 0,
+                        "timestamp": latest_position.timestamp.isoformat()
+                    }
+                
+                result.append(train_data)
+            except Exception as e:
+                logger.error(f"Error processing train {train.id}: {e}")
+                continue
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error listing trains: {e}")
+        return []
+
+
 async def validate_train_exists(train_id: int, db: Session) -> Train:
     """Validate that train exists and is active"""
     train = db.query(Train).filter(

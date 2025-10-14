@@ -1,29 +1,66 @@
-import React, { useEffect, useState } from 'react'
-import * as d3 from 'd3'
-import axios from 'axios'
+import React, { Suspense } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
+import { NotificationProvider } from './context/NotificationContext';
+import PrivateRoute from './components/auth/PrivateRoute';
+import LoginForm from './components/auth/LoginForm';
+import DashboardLayout from './components/layout/DashboardLayout';
+import Dashboard from './pages/Dashboard';
+import Trains from './pages/Trains';
+import Conflicts from './pages/Conflicts';
+import Sections from './pages/Sections';
+import Visualization from './pages/Visualization';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
-export default function App() {
-  const [health, setHealth] = useState('loading...')
-  const [dbStatus, setDbStatus] = useState('loading...')
-
-  useEffect(() => {
-    axios.get(`${API_BASE}/api/health`).then(r => setHealth(JSON.stringify(r.data))).catch(e => setHealth(String(e)))
-    axios.get(`${API_BASE}/api/db-check`).then(r => setDbStatus(JSON.stringify(r.data))).catch(e => setDbStatus(String(e)))
-
-    // D3 sample: render a simple bar
-    const svg = d3.select('#viz').append('svg').attr('width', 200).attr('height', 50)
-    svg.append('rect').attr('x', 10).attr('y', 10).attr('width', 180).attr('height', 20).attr('fill', '#4f46e5')
-    svg.append('text').attr('x', 100).attr('y', 25).attr('fill', '#fff').attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').text('D3 Ready')
-  }, [])
-
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">SIH Hackathon Starter</h1>
-      <p className="mt-2">Backend health: {health}</p>
-      <p className="mt-2">DB check: {dbStatus}</p>
-      <div id="viz" className="mt-4"></div>
+// Loading component
+const LoadingFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
+    <div className="text-center">
+      <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <p className="mt-4 text-gray-600 dark:text-gray-400">Loading...</p>
     </div>
-  )
-}
+  </div>
+);
+
+const App: React.FC = () => {
+  return (
+    <Router>
+      <ThemeProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <Suspense fallback={<LoadingFallback />}>
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/login" element={<LoginForm />} />
+
+                {/* Protected Routes */}
+                <Route
+                  path="/"
+                  element={
+                    <PrivateRoute>
+                      <DashboardLayout />
+                    </PrivateRoute>
+                  }
+                >
+                  <Route index element={<Navigate to="/dashboard" replace />} />
+                  <Route path="dashboard" element={<Dashboard />} />
+                  <Route path="trains" element={<Trains />} />
+                  <Route path="conflicts" element={<Conflicts />} />
+                  <Route path="sections" element={<Sections />} />
+                  <Route path="visualization" element={<Visualization />} />
+                  {/* Add more routes here as needed */}
+                </Route>
+
+                {/* Catch all - redirect to dashboard */}
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </Suspense>
+          </NotificationProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </Router>
+  );
+};
+
+export default App;
+
