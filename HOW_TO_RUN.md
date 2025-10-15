@@ -1,6 +1,6 @@
 # 🚂 How to Run the Railway Traffic Management System
 
-This guide will help you run the complete Railway Traffic Management System with the advanced conflict detection engine.
+This guide will help you run the complete Railway Traffic Management System with advanced conflict detection and controller action APIs.
 
 ## 📋 Prerequisites
 
@@ -10,7 +10,7 @@ Before starting, ensure you have:
 - **Python 3.11+** (for manual setup)
 - **Node.js 18+** & **npm** (for frontend)
 - **PostgreSQL 15+** with TimescaleDB (for manual setup)
-- **Redis 7+** (for manual setup)
+- **Redis 7+** (for caching and rate limiting)
 
 ## 🚀 Quick Start (Docker - Recommended)
 
@@ -45,6 +45,12 @@ docker-compose up --build -d
 ```bash
 # Wait for services to start, then initialize the database
 docker-compose exec backend python setup_railway_db.py
+
+# Create demo controller accounts
+docker-compose exec backend python setup_auth.py
+
+# (Optional) Load demo data for testing
+docker-compose exec backend python create_demo_data.py
 ```
 
 ### 4. Access the System
@@ -52,14 +58,31 @@ docker-compose exec backend python setup_railway_db.py
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/api/health
 - **Conflict Detection Status**: http://localhost:8000/api/conflicts/status
+
+### 5. Demo Credentials
+
+After running `setup_auth.py`, use these credentials:
+
+| Employee ID | Password | Role | Description |
+|------------|----------|------|-------------|
+| CTR001 | railway123 | Supervisor | Alice Johnson |
+| CTR002 | railway123 | Supervisor | Bob Smith |
+| ADMIN001 | admin123 | Admin | System Admin |
+| MANAGER001 | manager123 | Manager | Operations Manager |
+| OPERATOR001 | operator123 | Operator | Basic Operator |
 
 ## 🛠 Manual Setup (Development)
 
 ### 1. Database Setup
 
 ```bash
-# Start PostgreSQL with TimescaleDB
+# Start PostgreSQL with TimescaleDB and Redis using Docker Compose
+docker-compose up -d postgres redis
+
+# Or start manually:
+# PostgreSQL with TimescaleDB
 docker run -d --name postgres \
   -e POSTGRES_DB=railway_db \
   -e POSTGRES_USER=postgres \
@@ -67,7 +90,7 @@ docker run -d --name postgres \
   -p 5432:5432 \
   timescale/timescaledb:2.13.1-pg15
 
-# Start Redis
+# Redis
 docker run -d --name redis \
   -p 6379:6379 \
   redis:7-alpine
@@ -92,8 +115,17 @@ cp .env.example .env
 # Initialize database
 python setup_railway_db.py
 
+# Create demo users (optional)
+python setup_auth.py
+
+# Load demo data (optional)
+python create_demo_data.py
+
 # Start the server
 uvicorn app.main:app --reload --port 8000
+
+# Or use the startup script
+./start.sh
 ```
 
 ### 3. Frontend Setup
@@ -135,13 +167,111 @@ API_BASE_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:5173
 ```
 
-## ⚡ Conflict Detection System
+## ⚡ Conflict Detection & Controller Actions
 
-The conflict detection system starts automatically when the backend starts. You can:
+The system provides powerful conflict detection and controller action capabilities:
+
+### Controller Action APIs
+
+The system includes 5 comprehensive controller action endpoints:
+
+1. **GET /api/conflicts/active** - Get active conflicts with AI recommendations
+2. **POST /api/conflicts/{id}/resolve** - Resolve conflicts (accept/modify/reject)
+3. **POST /api/trains/{id}/control** - Control trains (delay/reroute/priority/stop/speed/resume)
+4. **POST /api/decisions/log** - Log manual controller decisions
+5. **GET /api/audit/decisions** - Query audit trail with filtering
+6. **GET /api/audit/performance** - Get performance metrics
+
+See [CONTROLLER_API_DOCS.md](backend/CONTROLLER_API_DOCS.md) for complete API documentation.
 
 ### Check System Status
 ```bash
+curl http://localhost:8000/api/health
 curl http://localhost:8000/api/conflicts/status
+```
+
+### Get Active Conflicts
+```bash
+# Login first
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"employee_id": "CTR001", "password": "railway123"}' \
+  | jq -r '.access_token')
+
+# Get active conflicts with AI recommendations
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/conflicts/active | jq
+```
+
+### Resolve a Conflict
+```bash
+# Accept AI recommendation
+curl -X POST http://localhost:8000/api/conflicts/1/resolve \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "accept",
+    "ai_solution_id": "ai_rec_123"
+  }' | jq
+
+# Modify AI recommendation
+curl -X POST http://localhost:8000/api/conflicts/2/resolve \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "modify",
+    "modified_solution": {
+      "train_actions": [
+        {"train_id": 1, "action": "delay", "parameters": {"delay_minutes": 10}}
+      ]
+    },
+    "modification_reason": "Track maintenance requires additional delay"
+  }' | jq
+```
+
+### Control a Train
+```bash
+# Delay a train
+curl -X POST http://localhost:8000/api/trains/1/control \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "delay",
+    "delay_minutes": 15,
+    "rationale": "Track maintenance ahead",
+    "emergency": false
+  }' | jq
+
+# Change train priority
+curl -X POST http://localhost:8000/api/trains/2/control \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "priority",
+    "new_priority": 9,
+    "rationale": "VIP passengers on board"
+  }' | jq
+
+# Reroute a train
+curl -X POST http://localhost:8000/api/trains/3/control \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "reroute",
+    "new_route": [2, 3, 4, 5],
+    "rationale": "Original route under maintenance"
+  }' | jq
+```
+
+### Query Audit Trail
+```bash
+# Get recent decisions
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/audit/decisions?limit=10&executed_only=true" | jq
+
+# Get performance metrics
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/audit/performance?days=7" | jq
 ```
 
 ### Run Manual Detection
@@ -161,20 +291,46 @@ curl http://localhost:8000/api/conflicts/metrics
 
 ## 🧪 Testing the System
 
-### 1. Run Backend Tests
+### 1. Run Automated Controller API Tests
 
 ```bash
 cd backend
+
+# Run the comprehensive automated test suite (13 tests)
+./test_controller_api.sh
+
+# This tests:
+# - Authentication
+# - Active conflicts retrieval
+# - Conflict resolution (accept/modify)
+# - Train control (delay/priority/reroute)
+# - Decision logging
+# - Audit trail queries
+# - Performance metrics
+# - Rate limiting
+# - Authorization
+# - Input validation
+```
+
+### 2. Run Backend Unit Tests
+
+```bash
+cd backend
+
+# Run all tests
 pytest tests/ -v
 
-# Run specific conflict detection tests
+# Run specific controller action tests
+pytest tests/test_controller_actions.py -v
+
+# Run conflict detection tests
 pytest tests/test_conflict_detection.py -v
 
 # Run with coverage
 pytest --cov=app tests/
 ```
 
-### 2. Test Conflict Detection
+### 3. Test Individual Endpoints
 
 ```bash
 # Performance test with mock trains
@@ -188,12 +344,16 @@ python websocket_test.py
 ./curl_tests.sh
 ```
 
-### 3. Load Test Data
+### 4. Load Test Data
 
 ```bash
-# Run the demo script to simulate train movements
+# Create demo trains and conflicts
 cd backend
-python demo_railway_system.py
+python create_demo_data.py
+
+# This creates:
+# - 5 trains (TR001-TR005) of various types
+# - 3 active conflicts with AI recommendations
 ```
 
 ## 📊 System Monitoring
@@ -201,22 +361,48 @@ python demo_railway_system.py
 ### Health Check
 ```bash
 curl http://localhost:8000/api/health
-```
 
-### Database Check
-```bash
-curl http://localhost:8000/api/db-check
-```
-
-### Performance Metrics
-```bash
-curl http://localhost:8000/api/performance
+# Response includes:
+# - Overall status
+# - Database status
+# - Redis status
+# - Active connections
+# - Timestamp
 ```
 
 ### System Information
 ```bash
 curl http://localhost:8000/api/system-info
+
+# Returns:
+# - System version
+# - Python version
+# - Database version
+# - Available endpoints
 ```
+
+### Performance Metrics (Requires Auth)
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/audit/performance?days=7
+
+# Returns:
+# - Total decisions
+# - Execution rate
+# - Average resolution time
+# - Decisions by controller
+# - Decisions by action type
+# - AI vs manual decisions
+# - Conflicts resolved/pending
+# - Average AI confidence
+```
+
+### Real-time Monitoring
+
+The system provides WebSocket connections for real-time monitoring:
+- Train positions: `ws://localhost:8000/ws/positions`
+- Conflict alerts: `ws://localhost:8000/ws/conflicts`
+- System status: `ws://localhost:8000/ws/system`
 
 ## 🌐 WebSocket Real-time Features
 
@@ -250,19 +436,38 @@ curl -X POST http://localhost:8000/api/auth/register \
   -d '{
     "name": "John Controller",
     "employee_id": "CTRL001",
-    "password": "secure_password123"
+    "password": "secure_password123",
+    "auth_level": "supervisor"
   }'
 ```
 
-### Login
+### Login and Get JWT Token
 
 ```bash
+# Login
 curl -X POST http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "employee_id": "CTRL001",
-    "password": "secure_password123"
+    "employee_id": "CTR001",
+    "password": "railway123"
   }'
+
+# Response includes:
+# - access_token (JWT)
+# - token_type (bearer)
+# - expires_in (3600 seconds)
+# - controller info
+
+# Save token for subsequent requests
+TOKEN="your_jwt_token_here"
+```
+
+### Use Token in Requests
+
+```bash
+# All controller action endpoints require authentication
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/conflicts/active
 ```
 
 ## 🚂 Sample Train Operations
@@ -313,6 +518,9 @@ curl -X POST http://localhost:8000/api/positions \
    
    # Check logs
    docker-compose logs postgres
+   
+   # Restart database
+   docker-compose restart postgres
    ```
 
 2. **Redis Connection Failed**
@@ -322,6 +530,9 @@ curl -X POST http://localhost:8000/api/positions \
    
    # Test Redis connection
    redis-cli ping
+   
+   # Restart Redis
+   docker-compose restart redis
    ```
 
 3. **Port Already in Use**
@@ -333,11 +544,49 @@ curl -X POST http://localhost:8000/api/positions \
    # Or change port in docker-compose.yml
    ```
 
-4. **TimescaleDB Extension Error**
+4. **Authentication Errors**
+   ```bash
+   # Recreate demo users
+   cd backend
+   python setup_auth.py
+   
+   # Check JWT secret in .env
+   echo $JWT_SECRET
+   ```
+
+5. **Database Schema Issues**
+   ```bash
+   # Add missing columns (if needed)
+   docker-compose exec postgres psql -U postgres -d railway_db
+   
+   # For AI fields in conflicts table:
+   ALTER TABLE conflicts ADD COLUMN IF NOT EXISTS ai_analyzed BOOLEAN DEFAULT FALSE;
+   ALTER TABLE conflicts ADD COLUMN IF NOT EXISTS ai_confidence REAL;
+   ALTER TABLE conflicts ADD COLUMN IF NOT EXISTS ai_recommendations JSONB;
+   
+   # For AI fields in decisions table:
+   ALTER TABLE decisions ADD COLUMN IF NOT EXISTS ai_generated BOOLEAN DEFAULT FALSE;
+   ALTER TABLE decisions ADD COLUMN IF NOT EXISTS ai_confidence REAL;
+   ```
+
+6. **TimescaleDB Extension Error**
    ```bash
    # Connect to database and enable extension
    docker-compose exec postgres psql -U postgres -d railway_db
    CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+   ```
+
+7. **Test Failures**
+   ```bash
+   # Ensure demo data exists
+   cd backend
+   python create_demo_data.py
+   
+   # Check server is running
+   curl http://localhost:8000/api/health
+   
+   # Run tests with verbose output
+   ./test_controller_api.sh
    ```
 
 ### Performance Issues
@@ -436,10 +685,41 @@ If you encounter issues:
 
 Once the system is running:
 
-1. **Explore the API**: Visit http://localhost:8000/docs
-2. **Test Conflict Detection**: Use the `/api/conflicts/detect` endpoint
+1. **Explore the API**: Visit http://localhost:8000/docs for interactive API documentation
+2. **Test Controller Actions**: 
+   - Run `./test_controller_api.sh` to verify all endpoints
+   - Try resolving conflicts manually through the API
+   - Test train control commands
 3. **Monitor Real-time**: Connect to WebSocket for live updates
-4. **Add Train Data**: Use the seed data or add your own trains
+4. **Add Train Data**: Use `create_demo_data.py` or add your own trains via API
 5. **View Analytics**: Check system performance metrics
+6. **Explore Frontend**: Visit http://localhost:5173 for the web interface
+7. **Read Documentation**:
+   - [CONTROLLER_API_DOCS.md](backend/CONTROLLER_API_DOCS.md) - Complete API reference
+   - [CONTROLLER_ARCHITECTURE.md](backend/CONTROLLER_ARCHITECTURE.md) - System architecture
+   - [STARTUP_GUIDE.md](backend/STARTUP_GUIDE.md) - Quick start guide
+   - [TEST_RESULTS.md](backend/TEST_RESULTS.md) - Test coverage report
 
-The system is now ready for railway traffic management with real-time conflict detection! 🚂✨
+## 📚 Additional Documentation
+
+- **API Reference**: [CONTROLLER_API_DOCS.md](backend/CONTROLLER_API_DOCS.md)
+- **Implementation Details**: [CONTROLLER_IMPLEMENTATION_SUMMARY.md](backend/CONTROLLER_IMPLEMENTATION_SUMMARY.md)
+- **Quick Reference**: [CONTROLLER_QUICK_REF.md](backend/CONTROLLER_QUICK_REF.md)
+- **Architecture**: [CONTROLLER_ARCHITECTURE.md](backend/CONTROLLER_ARCHITECTURE.md)
+- **Conflict Detection**: [CONFLICT_DETECTION_README.md](backend/CONFLICT_DETECTION_README.md)
+- **Database Setup**: [DATABASE_TESTING_SETUP.md](backend/DATABASE_TESTING_SETUP.md)
+
+## 🎓 Key Features
+
+✅ **Real-time Conflict Detection** - Automated detection of scheduling conflicts  
+✅ **AI-powered Recommendations** - Smart conflict resolution suggestions  
+✅ **Controller Action APIs** - Complete control over trains and conflicts  
+✅ **Audit Trail** - Full logging of all decisions and actions  
+✅ **Rate Limiting** - Protection for critical operations  
+✅ **WebSocket Support** - Real-time notifications  
+✅ **Background Tasks** - Async execution of train control commands  
+✅ **Role-based Access** - Fine-grained permission control  
+✅ **Comprehensive Testing** - 13+ automated tests, 15+ unit tests  
+✅ **Performance Metrics** - Detailed analytics and monitoring  
+
+The system is now ready for railway traffic management with real-time conflict detection and controller actions! 🚂✨
