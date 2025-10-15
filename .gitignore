@@ -180,6 +180,8 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
+server.log
+backend/server.log
 
 # Runtime data
 pids/
