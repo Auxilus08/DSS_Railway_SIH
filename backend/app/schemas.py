@@ -31,6 +31,22 @@ class OperationalStatusEnum(str, Enum):
     EMERGENCY = "emergency"
 
 
+class DecisionActionEnum(str, Enum):
+    ACCEPT = "accept"
+    MODIFY = "modify"
+    REJECT = "reject"
+    MANUAL_OVERRIDE = "manual_override"
+
+
+class TrainControlCommand(str, Enum):
+    DELAY = "delay"
+    REROUTE = "reroute"
+    PRIORITY = "priority"
+    STOP = "stop"
+    SPEED_LIMIT = "speed_limit"
+    RESUME = "resume"
+
+
 # Authentication Schemas
 class LoginRequest(BaseModel):
     employee_id: str = Field(..., min_length=3, max_length=20)
@@ -301,3 +317,209 @@ def validate_train_speed(speed: float, max_speed: int) -> bool:
 # Update forward references
 LoginResponse.model_rebuild()
 TrainWithPosition.model_rebuild()
+
+
+# ============================================================================
+# CONTROLLER ACTION SCHEMAS
+# ============================================================================
+
+# Conflict Resolution Schemas
+class ConflictResolutionAction(str, Enum):
+    ACCEPT = "accept"
+    MODIFY = "modify"
+    REJECT = "reject"
+
+
+class ConflictResolveRequest(BaseModel):
+    action: ConflictResolutionAction = Field(..., description="Controller decision on AI recommendation")
+    solution_id: Optional[str] = Field(None, description="ID of the AI solution being acted upon")
+    modifications: Optional[Dict[str, Any]] = Field(None, description="Modified parameters if action is 'modify'")
+    rationale: str = Field(..., min_length=10, max_length=1000, description="Explanation for the decision")
+    
+    @field_validator('modifications')
+    @classmethod
+    def validate_modifications(cls, v, info):
+        if info.data.get('action') == ConflictResolutionAction.MODIFY and not v:
+            raise ValueError("Modifications required when action is 'modify'")
+        return v
+
+
+class ConflictResolveResponse(BaseModel):
+    success: bool
+    conflict_id: int
+    action: ConflictResolutionAction
+    decision_id: int
+    resolution_time: datetime
+    message: str
+    applied_solution: Optional[Dict[str, Any]] = None
+
+
+# Train Control Schemas
+class TrainControlRequest(BaseModel):
+    command: TrainControlCommand = Field(..., description="Control command to execute")
+    parameters: Dict[str, Any] = Field(..., description="Command-specific parameters")
+    reason: str = Field(..., min_length=10, max_length=500, description="Justification for manual control")
+    emergency: bool = Field(False, description="Whether this is an emergency action")
+    
+    @field_validator('parameters')
+    @classmethod
+    def validate_parameters(cls, v, info):
+        command = info.data.get('command')
+        
+        if command == TrainControlCommand.DELAY:
+            if 'delay_minutes' not in v or not isinstance(v['delay_minutes'], (int, float)):
+                raise ValueError("delay_minutes required for DELAY command")
+            if v['delay_minutes'] < 0 or v['delay_minutes'] > 180:
+                raise ValueError("delay_minutes must be between 0 and 180")
+        
+        elif command == TrainControlCommand.REROUTE:
+            if 'new_route' not in v or not isinstance(v['new_route'], list):
+                raise ValueError("new_route (list of section IDs) required for REROUTE command")
+            if len(v['new_route']) < 1:
+                raise ValueError("new_route must contain at least one section")
+        
+        elif command == TrainControlCommand.PRIORITY:
+            if 'new_priority' not in v or not isinstance(v['new_priority'], int):
+                raise ValueError("new_priority required for PRIORITY command")
+            if v['new_priority'] < 1 or v['new_priority'] > 10:
+                raise ValueError("new_priority must be between 1 and 10")
+        
+        elif command == TrainControlCommand.SPEED_LIMIT:
+            if 'max_speed_kmh' not in v or not isinstance(v['max_speed_kmh'], (int, float)):
+                raise ValueError("max_speed_kmh required for SPEED_LIMIT command")
+            if v['max_speed_kmh'] < 0 or v['max_speed_kmh'] > 300:
+                raise ValueError("max_speed_kmh must be between 0 and 300")
+        
+        return v
+
+
+class TrainControlResponse(BaseModel):
+    success: bool
+    train_id: int
+    train_number: str
+    command: TrainControlCommand
+    execution_time: datetime
+    decision_id: int
+    notification_sent: bool
+    message: str
+
+
+# Active Conflicts Schemas
+class ConflictWithRecommendations(BaseModel):
+    id: int
+    conflict_type: str
+    severity: ConflictSeverityEnum
+    trains_involved: List[int]
+    sections_involved: List[int]
+    detection_time: datetime
+    estimated_impact_minutes: Optional[int]
+    description: str
+    time_to_impact: float  # Minutes until conflict occurs
+    ai_recommendations: Optional[List[Dict[str, Any]]] = None  # Changed from Dict to List[Dict]
+    ai_confidence: Optional[float] = None
+    priority_score: float  # Calculated priority for controller attention
+    
+    class Config:
+        from_attributes = True
+
+
+class ActiveConflictsResponse(BaseModel):
+    total_conflicts: int
+    critical_conflicts: int
+    high_priority_conflicts: int
+    conflicts: List[ConflictWithRecommendations]
+    timestamp: datetime
+
+
+# Decision Logging Schemas
+class DecisionLogRequest(BaseModel):
+    conflict_id: Optional[int] = Field(None, description="Related conflict ID if applicable")
+    train_id: Optional[int] = Field(None, description="Related train ID if applicable")
+    section_id: Optional[int] = Field(None, description="Related section ID if applicable")
+    action_taken: str = Field(..., min_length=3, max_length=100, description="Action taken by controller")
+    rationale: str = Field(..., min_length=10, max_length=2000, description="Detailed rationale for decision")
+    parameters: Optional[Dict[str, Any]] = Field(None, description="Additional decision parameters")
+    outcome: Optional[str] = Field(None, max_length=500, description="Observed outcome of the decision")
+    
+    @field_validator('action_taken')
+    @classmethod
+    def validate_action(cls, v):
+        valid_actions = ['reroute', 'delay', 'priority_change', 'emergency_stop', 'speed_limit', 'manual_override']
+        if v.lower() not in valid_actions:
+            raise ValueError(f"action_taken must be one of: {valid_actions}")
+        return v.lower()
+
+
+class DecisionLogResponse(BaseModel):
+    success: bool
+    decision_id: int
+    controller_id: int
+    timestamp: datetime
+    logged: bool
+    message: str
+
+
+# Audit Trail Schemas
+class AuditQueryFilters(BaseModel):
+    controller_id: Optional[int] = Field(None, description="Filter by controller ID")
+    conflict_id: Optional[int] = Field(None, description="Filter by conflict ID")
+    train_id: Optional[int] = Field(None, description="Filter by train ID")
+    section_id: Optional[int] = Field(None, description="Filter by section ID")
+    action_taken: Optional[str] = Field(None, description="Filter by action type")
+    start_date: Optional[datetime] = Field(None, description="Start date for query range")
+    end_date: Optional[datetime] = Field(None, description="End date for query range")
+    executed_only: Optional[bool] = Field(None, description="Only show executed decisions")
+    approved_only: Optional[bool] = Field(None, description="Only show approved decisions")
+    limit: int = Field(100, ge=1, le=1000, description="Maximum results to return")
+    offset: int = Field(0, ge=0, description="Offset for pagination")
+    export_format: Optional[str] = Field(None, pattern="^(json|csv|pdf)$", description="Export format")
+
+
+class DecisionAuditRecord(BaseModel):
+    id: int
+    controller_id: int
+    controller_name: str
+    controller_employee_id: str
+    conflict_id: Optional[int]
+    train_id: Optional[int]
+    section_id: Optional[int]
+    action_taken: str
+    timestamp: datetime
+    rationale: str
+    parameters: Optional[Dict[str, Any]]
+    executed: bool
+    execution_time: Optional[datetime]
+    execution_result: Optional[str]
+    approval_required: bool
+    approved_by_controller_id: Optional[int]
+    approved_by_name: Optional[str]
+    approval_time: Optional[datetime]
+    ai_generated: bool
+    ai_confidence: Optional[float]
+    
+    class Config:
+        from_attributes = True
+
+
+class AuditTrailResponse(BaseModel):
+    total_records: int
+    returned_records: int
+    offset: int
+    decisions: List[DecisionAuditRecord]
+    performance_metrics: Optional[Dict[str, Any]] = None
+    timestamp: datetime
+
+
+class PerformanceMetricsResponse(BaseModel):
+    total_decisions: int
+    executed_decisions: int
+    execution_rate: float
+    average_resolution_time_minutes: float
+    decisions_by_controller: Dict[str, int]
+    decisions_by_action: Dict[str, int]
+    ai_vs_manual_decisions: Dict[str, int]
+    conflicts_resolved: int
+    conflicts_pending: int
+    average_ai_confidence: float
+    period_start: datetime
+    period_end: datetime
